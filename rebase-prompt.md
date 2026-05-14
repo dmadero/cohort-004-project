@@ -9,7 +9,7 @@ Read both files thoroughly before starting.
 
 ## What You're Doing
 
-You're creating a new branch `course-commits` from `main` with exactly 38 clean commits. Each commit is named `XX.YY.ZZ: Title` corresponding to a lesson in the course. The source commits come from the `live-run-through` branch in this repo, plus 2 commits from a fork at `~/repos/ai/cohort-003-project-fork`.
+You're creating a new branch `course-commits` from `main` with exactly 38 clean commits. Each commit is named `XX.YY.ZZ: Title` corresponding to a lesson in the course. The source commits come from the `live-run-through` branch in this repo, plus 2 commits from a fork at `~/repos/ai/cohort-004-project-fork`.
 
 ## Rules
 
@@ -27,7 +27,7 @@ You're creating a new branch `course-commits` from `main` with exactly 38 clean 
 ## Setup
 
 ```bash
-git remote add fork ~/repos/ai/cohort-003-project-fork
+git remote add fork ~/repos/ai/cohort-004-project-fork
 git fetch fork
 git checkout -b course-commits main
 ```

@@ -8,9 +8,10 @@ Commit naming: `XX.YY.ZZ: Title`
 ## Sources
 
 Commits come from two repos:
+
 - **Main repo**: `live-run-through` branch in this repo
-- **Fork repo**: `~/repos/ai/cohort-003-project-fork` (a throwaway fork created during lesson 07.07)
-  - To fetch: `git remote add fork ~/repos/ai/cohort-003-project-fork && git fetch fork`
+- **Fork repo**: `~/repos/ai/cohort-004-project-fork` (a throwaway fork created during lesson 07.07)
+  - To fetch: `git remote add fork ~/repos/ai/cohort-004-project-fork && git fetch fork`
   - Fork commits are used for 07.08 (admin analytics Phase 3 + polish)
 
 ## Section 01: Before We Start
