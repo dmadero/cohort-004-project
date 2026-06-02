@@ -4,6 +4,8 @@ import type { Route } from "./+types/home";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { buildCourseQuery, getLessonCountForCourse } from "~/services/courseService";
+import { getCourseRatingSummary } from "~/services/reviewService";
+import { StarRatingDisplay } from "~/components/star-rating";
 import { getAllCategories } from "~/services/categoryService";
 import { CourseStatus } from "~/db/schema";
 import { BookOpen, GraduationCap, Users, ArrowRight, User, Moon, Sun } from "lucide-react";
@@ -25,6 +27,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const featured = courses.slice(0, 3).map((course) => ({
     ...course,
     lessonCount: getLessonCountForCourse(course.id),
+    ratingSummary: getCourseRatingSummary(course.id),
   }));
   const categories = getAllCategories();
   const users = getAllUsers();
@@ -183,6 +186,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     </h3>
                   </CardHeader>
                   <CardContent>
+                    <StarRatingDisplay
+                      average={course.ratingSummary.average}
+                      count={course.ratingSummary.count}
+                      className="mb-2"
+                    />
                     <p className="line-clamp-2 text-sm text-muted-foreground">
                       {course.description}
                     </p>

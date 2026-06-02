@@ -1,4 +1,10 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  unique,
+} from "drizzle-orm/sqlite-core";
 
 export enum UserRole {
   Student = "student",
@@ -127,6 +133,28 @@ export const lessonProgress = sqliteTable("lesson_progress", {
   status: text("status").notNull().$type<LessonProgressStatus>(),
   completedAt: text("completed_at"),
 });
+
+export const courseReviews = sqliteTable(
+  "course_reviews",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    courseId: integer("course_id")
+      .notNull()
+      .references(() => courses.id),
+    rating: integer("rating").notNull(), // 1–5, enforced in the service layer
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  // One rating per student per course — enables upsert on re-submission.
+  (t) => [unique().on(t.userId, t.courseId)]
+);
 
 export const quizzes = sqliteTable("quizzes", {
   id: integer("id").primaryKey({ autoIncrement: true }),

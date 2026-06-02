@@ -2,6 +2,8 @@ import { Link } from "react-router";
 import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount, getTotalLessonCount, getNextIncompleteLesson } from "~/services/progressService";
+import { getCourseRatingSummary, getReviewByUserAndCourse } from "~/services/reviewService";
+import { StarRatingDisplay, StarRatingInput } from "~/components/star-rating";
 import { getCurrentUserId } from "~/lib/session";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
@@ -45,6 +47,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       enrollment.courseId
     );
     const isCompleted = enrollment.completedAt !== null;
+    const ratingSummary = getCourseRatingSummary(enrollment.courseId);
+    const myReview = getReviewByUserAndCourse(currentUserId, enrollment.courseId);
 
     return {
       ...enrollment,
@@ -53,6 +57,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       totalLessons,
       nextLessonId: nextLesson?.id ?? null,
       isCompleted,
+      ratingSummary,
+      myRating: myReview?.rating ?? null,
     };
   });
 
@@ -175,6 +181,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                           style={{ width: `${course.progress}%` }}
                         />
                       </div>
+                      <StarRatingDisplay
+                        average={course.ratingSummary.average}
+                        count={course.ratingSummary.count}
+                        className="mt-3"
+                      />
                     </CardContent>
                     <CardFooter>
                       {course.nextLessonId ? (
@@ -234,21 +245,29 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                       </p>
                     </CardHeader>
                     <CardContent className="flex-1">
-                      <div className="flex items-center gap-2 text-sm text-green-600">
+                      <div className="mb-3 flex items-center gap-2 text-sm text-green-600">
                         <CheckCircle2 className="size-4" />
                         <span>
                           Completed — {course.totalLessons} lessons
                         </span>
                       </div>
+                      <StarRatingDisplay
+                        average={course.ratingSummary.average}
+                        count={course.ratingSummary.count}
+                      />
                     </CardContent>
-                    <CardFooter>
+                    <CardFooter className="flex-col items-start gap-3">
+                      <StarRatingInput
+                        slug={course.courseSlug}
+                        currentRating={course.myRating}
+                      />
                       <Link
                         to={`/courses/${course.courseSlug}`}
                         className="w-full"
                       >
                         <Button className="w-full" variant="outline">
                           <BookOpen className="mr-2 size-4" />
-                          Review Course
+                          View Course
                         </Button>
                       </Link>
                     </CardFooter>

@@ -1,6 +1,8 @@
 import { Form, Link, useSearchParams, useNavigation, isRouteErrorResponse } from "react-router";
 import type { Route } from "./+types/courses";
 import { buildCourseQuery, getLessonCountForCourse } from "~/services/courseService";
+import { getCourseRatingSummary } from "~/services/reviewService";
+import { StarRatingDisplay } from "~/components/star-rating";
 import { getAllCategories } from "~/services/categoryService";
 import { CourseStatus } from "~/db/schema";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
@@ -63,6 +65,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     return {
       ...course,
       lessonCount: getLessonCountForCourse(course.id),
+      ratingSummary: getCourseRatingSummary(course.id),
       progress: userProgress?.progress ?? null,
       completedLessons: userProgress?.completedLessons ?? null,
       pppPrice,
@@ -206,6 +209,11 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
                   </h3>
                 </CardHeader>
                 <CardContent>
+                  <StarRatingDisplay
+                    average={course.ratingSummary.average}
+                    count={course.ratingSummary.count}
+                    className="mb-2"
+                  />
                   <p className="line-clamp-2 text-sm text-muted-foreground">
                     {course.description}
                   </p>

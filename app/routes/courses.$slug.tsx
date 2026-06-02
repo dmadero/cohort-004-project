@@ -9,6 +9,12 @@ import {
 } from "~/services/courseService";
 import { isUserEnrolled } from "~/services/enrollmentService";
 import {
+  getCourseRatingSummary,
+  getReviewByUserAndCourse,
+  hasUserCompletedCourse,
+} from "~/services/reviewService";
+import { StarRatingDisplay, StarRatingInput } from "~/components/star-rating";
+import {
   calculateProgress,
   getLessonProgressForCourse,
   getNextIncompleteLesson,
@@ -68,12 +74,15 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const currentUserId = await getCurrentUserId(request);
 
   let enrolled = false;
+  let completed = false;
   let progress = 0;
   let lessonProgressMap: Record<number, string> = {};
   let nextLessonId: number | null = null;
+  let myRating: number | null = null;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
+    completed = hasUserCompletedCourse(currentUserId, course.id);
 
     if (enrolled) {
       progress = calculateProgress(currentUserId, course.id, false, false);
@@ -88,8 +97,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
       const nextLesson = getNextIncompleteLesson(currentUserId, course.id);
       nextLessonId = nextLesson?.id ?? null;
+
+      myRating = getReviewByUserAndCourse(currentUserId, course.id)?.rating ?? null;
     }
   }
+
+  const ratingSummary = getCourseRatingSummary(course.id);
 
   // Render sales copy from Markdown to HTML server-side
   const salesCopyHtml = courseWithDetails.salesCopy
@@ -107,12 +120,15 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     salesCopyHtml,
     lessonCount,
     enrolled,
+    completed,
     progress,
     lessonProgressMap,
     nextLessonId,
     currentUserId,
     pppPrice,
     tierInfo,
+    ratingSummary,
+    myRating,
   };
 }
 
@@ -175,12 +191,15 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     salesCopyHtml,
     lessonCount,
     enrolled,
+    completed,
     progress,
     lessonProgressMap,
     nextLessonId,
     currentUserId,
     pppPrice,
     tierInfo,
+    ratingSummary,
+    myRating,
   } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -320,6 +339,10 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
               {formatDuration(totalDuration, true, false, false)} total
             </span>
           )}
+          <StarRatingDisplay
+            average={ratingSummary.average}
+            count={ratingSummary.count}
+          />
         </div>
       </div>
 
@@ -413,6 +436,17 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                       Buy More Seats
                     </Button>
                   </Link>
+                  {completed && (
+                    <div className="border-t pt-4">
+                      <p className="mb-2 text-sm font-medium">
+                        Rate this course
+                      </p>
+                      <StarRatingInput
+                        slug={course.slug}
+                        currentRating={myRating}
+                      />
+                    </div>
+                  )}
                 </>
               ) : (
                 enrollButton
