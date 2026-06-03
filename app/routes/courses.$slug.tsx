@@ -48,6 +48,9 @@ import { formatDuration, formatPrice } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice, getCountryTierInfo } from "~/lib/ppp";
+import { loadCommentSection } from "~/lib/comments.server";
+import { CommentThread } from "~/components/comment-thread";
+import { MessageSquare } from "lucide-react";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Course";
@@ -115,8 +118,18 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     : courseWithDetails.price;
   const tierInfo = getCountryTierInfo(country);
 
+  // Course-level discussion — gated to participants (hidden otherwise).
+  const commentSection = await loadCommentSection(
+    currentUserId,
+    null,
+    course.id,
+    course.id,
+    courseWithDetails.instructorId
+  );
+
   return {
     course: courseWithDetails,
+    commentSection,
     salesCopyHtml,
     lessonCount,
     enrolled,
@@ -188,6 +201,7 @@ export function HydrateFallback() {
 export default function CourseDetail({ loaderData }: Route.ComponentProps) {
   const {
     course,
+    commentSection,
     salesCopyHtml,
     lessonCount,
     enrolled,
@@ -348,38 +362,71 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
 
       {/* Two-column: sales copy left, sidebar right */}
       <div className="grid gap-8 lg:grid-cols-3">
-        {/* Left column: sales copy + course content */}
+        {/* Left column: sales copy + course content (+ discussion for participants) */}
         <div className="lg:col-span-2">
-          {salesCopyHtml ? (
-            <div
-              className="prose prose-neutral dark:prose-invert max-w-none"
-              dangerouslySetInnerHTML={{ __html: salesCopyHtml }}
-            />
-          ) : (
-            <p className="text-muted-foreground">{course.description}</p>
-          )}
+          {(() => {
+            const overview = (
+              <>
+                {salesCopyHtml ? (
+                  <div
+                    className="prose prose-neutral dark:prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: salesCopyHtml }}
+                  />
+                ) : (
+                  <p className="text-muted-foreground">{course.description}</p>
+                )}
 
-          {/* Bottom CTA */}
-          {!enrolled && !isInstructor && (
-            <div className="mt-8 rounded-lg border bg-muted/50 p-6">
-              <h3 className="mb-2 text-lg font-semibold">
-                Ready to get started?
-              </h3>
-              <p className="mb-4 text-sm text-muted-foreground">
-                Join this course and start learning today.
-              </p>
-              {enrollButton}
-            </div>
-          )}
+                {/* Bottom CTA */}
+                {!enrolled && !isInstructor && (
+                  <div className="mt-8 rounded-lg border bg-muted/50 p-6">
+                    <h3 className="mb-2 text-lg font-semibold">
+                      Ready to get started?
+                    </h3>
+                    <p className="mb-4 text-sm text-muted-foreground">
+                      Join this course and start learning today.
+                    </p>
+                    {enrollButton}
+                  </div>
+                )}
 
-          <div className="mt-8">
-            <CourseContent
-              course={course}
-              enrolled={enrolled}
-              isInstructor={isInstructor}
-              lessonProgressMap={lessonProgressMap}
-            />
-          </div>
+                <div className="mt-8">
+                  <CourseContent
+                    course={course}
+                    enrolled={enrolled}
+                    isInstructor={isInstructor}
+                    lessonProgressMap={lessonProgressMap}
+                  />
+                </div>
+              </>
+            );
+
+            // The discussion is hidden from non-participants; only then do we
+            // surface the Overview / Discussion tabs.
+            if (!commentSection.canComment) return overview;
+
+            return (
+              <Tabs defaultValue="overview">
+                <TabsList className="mb-6">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="discussion">
+                    <MessageSquare className="size-4" />
+                    Discussion
+                    <span className="ml-1 rounded-full bg-muted-foreground/15 px-1.5 text-xs">
+                      {commentSection.count}
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="overview">{overview}</TabsContent>
+                <TabsContent value="discussion">
+                  <CommentThread
+                    comments={commentSection.comments}
+                    lessonId={null}
+                    courseId={course.id}
+                  />
+                </TabsContent>
+              </Tabs>
+            );
+          })()}
         </div>
 
         {/* Right column: progress/enrollment card */}

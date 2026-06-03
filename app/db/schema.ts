@@ -4,7 +4,10 @@ import {
   integer,
   real,
   unique,
+  check,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 export enum UserRole {
   Student = "student",
@@ -266,6 +269,41 @@ export const coupons = sqliteTable("coupons", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const comments = sqliteTable(
+  "comments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    // Polymorphic target via two nullable FKs — exactly one is set per row.
+    // Real foreign keys (project convention) are kept on both; the
+    // exactly-one-target invariant is enforced in commentService (primary)
+    // with the CHECK below as a DB backstop.
+    lessonId: integer("lesson_id").references(() => lessons.id),
+    courseId: integer("course_id").references(() => courses.id),
+    // Self-referential FK enabling arbitrary-depth threading.
+    parentId: integer("parent_id").references(
+      (): AnySQLiteColumn => comments.id
+    ),
+    body: text("body").notNull(), // raw Markdown source; rendered at read time
+    deletedAt: text("deleted_at"), // soft-delete tombstone (ISO)
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [
+    // Backstop for the service-enforced invariant: exactly one target.
+    check(
+      "comments_exactly_one_target",
+      sql`(${t.lessonId} IS NOT NULL) + (${t.courseId} IS NOT NULL) = 1`
+    ),
+  ]
+);
 
 export const videoWatchEvents = sqliteTable("video_watch_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),

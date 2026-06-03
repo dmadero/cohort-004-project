@@ -55,6 +55,8 @@ import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
 import { findPurchase } from "~/services/purchaseService";
 import { parseFormData, parseParams } from "~/lib/validation";
+import { loadCommentSection } from "~/lib/comments.server";
+import { CommentThread } from "~/components/comment-thread";
 
 const lessonParamsSchema = z.object({
   slug: z.string().min(1),
@@ -248,12 +250,22 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }
   }
 
+  // Lesson discussion — gated to the course's participants (hidden otherwise).
+  const commentSection = await loadCommentSection(
+    currentUserId,
+    lesson.id,
+    null,
+    course.id,
+    course.instructorId
+  );
+
   return {
     course: {
       id: courseWithDetails.id,
       title: courseWithDetails.title,
       slug: courseWithDetails.slug,
     },
+    commentSection,
     curriculum: courseWithDetails.modules.map((m) => ({
       id: m.id,
       title: m.title,
@@ -365,6 +377,7 @@ function useAutoplay() {
 export default function LessonViewer({ loaderData }: Route.ComponentProps) {
   const {
     course,
+    commentSection,
     curriculum,
     module: mod,
     lesson,
@@ -589,6 +602,18 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
                   </Button>
                 </fetcher.Form>
               )}
+            </div>
+          )}
+
+          {/* Discussion — gated to the course's participants */}
+          {commentSection.canComment && (
+            <div className="mb-8 border-t pt-8">
+              <CommentThread
+                comments={commentSection.comments}
+                lessonId={lesson.id}
+                courseId={null}
+                title="Discussion"
+              />
             </div>
           )}
 

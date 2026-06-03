@@ -43,8 +43,12 @@ function slugify(title: string): string {
 async function seed() {
   console.log("Seeding database...");
 
-  // Drop and recreate tables for a clean seed
+  // Drop and recreate tables for a clean seed. Disable FK enforcement during
+  // teardown so drop order can't trip the implicit row-delete FK checks.
+  sqlite.pragma("foreign_keys = OFF");
   sqlite.exec(`
+    DROP TABLE IF EXISTS comments;
+    DROP TABLE IF EXISTS course_reviews;
     DROP TABLE IF EXISTS video_watch_events;
     DROP TABLE IF EXISTS quiz_answers;
     DROP TABLE IF EXISTS quiz_attempts;
@@ -64,6 +68,7 @@ async function seed() {
     DROP TABLE IF EXISTS users;
     DROP TABLE IF EXISTS __drizzle_migrations;
   `);
+  sqlite.pragma("foreign_keys = ON");
 
   // Create tables using the same Drizzle migrations as the live database
   migrate(db, { migrationsFolder });
