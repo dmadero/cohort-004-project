@@ -11,7 +11,6 @@ import {
 
 // ─── Enrollment Service ───
 // Handles enrollment, unenrollment, duplicate prevention, and enrollment validation.
-// Uses positional parameters (project convention).
 
 export function getEnrollmentById(id: number) {
   return db.select().from(enrollments).where(eq(enrollments.id, id)).get();
@@ -43,7 +42,8 @@ export function getEnrollmentCountForCourse(courseId: number) {
   return result?.count ?? 0;
 }
 
-export function findEnrollment(userId: number, courseId: number) {
+export function findEnrollment(opts: { userId: number; courseId: number }) {
+  const { userId, courseId } = opts;
   return db
     .select()
     .from(enrollments)
@@ -53,19 +53,21 @@ export function findEnrollment(userId: number, courseId: number) {
     .get();
 }
 
-export function isUserEnrolled(userId: number, courseId: number) {
-  return !!findEnrollment(userId, courseId);
+export function isUserEnrolled(opts: { userId: number; courseId: number }) {
+  const { userId, courseId } = opts;
+  return !!findEnrollment({ userId, courseId });
 }
 
-export function enrollUser(
-  userId: number,
-  courseId: number,
-  sendEmail: boolean,
-  skipValidation: boolean
-) {
+export function enrollUser(opts: {
+  userId: number;
+  courseId: number;
+  sendEmail: boolean;
+  skipValidation: boolean;
+}) {
+  const { userId, courseId, sendEmail, skipValidation } = opts;
   if (!skipValidation) {
     // Check if already enrolled
-    const existing = findEnrollment(userId, courseId);
+    const existing = findEnrollment({ userId, courseId });
     if (existing) {
       throw new Error("User is already enrolled in this course");
     }
@@ -95,8 +97,9 @@ export function enrollUser(
   return enrollment;
 }
 
-export function unenrollUser(userId: number, courseId: number) {
-  const existing = findEnrollment(userId, courseId);
+export function unenrollUser(opts: { userId: number; courseId: number }) {
+  const { userId, courseId } = opts;
+  const existing = findEnrollment({ userId, courseId });
   if (!existing) {
     throw new Error("User is not enrolled in this course");
   }
@@ -110,7 +113,11 @@ export function unenrollUser(userId: number, courseId: number) {
     .get();
 }
 
-export function markEnrollmentComplete(userId: number, courseId: number) {
+export function markEnrollmentComplete(opts: {
+  userId: number;
+  courseId: number;
+}) {
+  const { userId, courseId } = opts;
   return db
     .update(enrollments)
     .set({ completedAt: new Date().toISOString() })

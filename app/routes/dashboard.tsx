@@ -31,24 +31,27 @@ export async function loader({ request }: Route.LoaderArgs) {
   const enrolledCourses = getUserEnrolledCourses(currentUserId);
 
   const coursesWithProgress = enrolledCourses.map((enrollment) => {
-    const progress = calculateProgress(
-      currentUserId,
-      enrollment.courseId,
-      false,
-      false
-    );
-    const completedLessons = getCompletedLessonCount(
-      currentUserId,
-      enrollment.courseId
-    );
+    const progress = calculateProgress({
+      userId: currentUserId,
+      courseId: enrollment.courseId,
+      includeQuizzes: false,
+      weightByDuration: false,
+    });
+    const completedLessons = getCompletedLessonCount({
+      userId: currentUserId,
+      courseId: enrollment.courseId,
+    });
     const totalLessons = getTotalLessonCount(enrollment.courseId);
-    const nextLesson = getNextIncompleteLesson(
-      currentUserId,
-      enrollment.courseId
-    );
+    const nextLesson = getNextIncompleteLesson({
+      userId: currentUserId,
+      courseId: enrollment.courseId,
+    });
     const isCompleted = enrollment.completedAt !== null;
     const ratingSummary = getCourseRatingSummary(enrollment.courseId);
-    const myReview = getReviewByUserAndCourse(currentUserId, enrollment.courseId);
+    const myReview = getReviewByUserAndCourse({
+      userId: currentUserId,
+      courseId: enrollment.courseId,
+    });
 
     return {
       ...enrollment,

@@ -33,7 +33,11 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   // upsertReview enforces that the student has completed the course.
-  upsertReview(currentUserId, course.id, parsed.data.rating);
+  upsertReview({
+    userId: currentUserId,
+    courseId: course.id,
+    rating: parsed.data.rating,
+  });
 
   const referer = request.headers.get("Referer");
   return redirect(referer ?? `/courses/${slug}`);

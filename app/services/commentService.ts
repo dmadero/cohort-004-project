@@ -9,7 +9,8 @@ import { getCourseById } from "./courseService";
 // Threaded comments on lessons and courses. Owns the feature's gating
 // (canCommentOn), the exactly-one-target invariant, flat-query → tree
 // assembly, ordering, soft-delete, and edit/delete permission checks.
-// Uses positional parameters (project convention).
+// Functions with 2+ same-type params take a single `opts` object (project
+// convention).
 
 /** Max comment body length. Shared with the route's Zod schema. */
 export const MAX_COMMENT_LENGTH = 5000;
@@ -35,10 +36,11 @@ function validateBody(body: string): string {
  * that gates it. Enforces the exactly-one-target invariant. A lesson resolves
  * to its module's course.
  */
-function resolveCourseId(
-  lessonId: number | null,
-  courseId: number | null
-): number {
+function resolveCourseId(opts: {
+  lessonId: number | null;
+  courseId: number | null;
+}): number {
+  const { lessonId, courseId } = opts;
   if ((lessonId == null) === (courseId == null)) {
     throw new Error("A comment must target exactly one of a lesson or a course");
   }
@@ -69,7 +71,11 @@ function resolveCourseId(
  * Instructors are NOT enrolled, so the rule is:
  * enrolled in the course OR is the course's instructor OR is an admin.
  */
-export function canCommentOn(userId: number, courseId: number): boolean {
+export function canCommentOn(opts: {
+  userId: number;
+  courseId: number;
+}): boolean {
+  const { userId, courseId } = opts;
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) return false;
   if (user.role === UserRole.Admin) return true;
@@ -77,23 +83,24 @@ export function canCommentOn(userId: number, courseId: number): boolean {
   const course = getCourseById(courseId);
   if (course?.instructorId === userId) return true;
 
-  return isUserEnrolled(userId, courseId);
+  return isUserEnrolled({ userId, courseId });
 }
 
 /**
  * Post a top-level comment on a lesson or a course. Exactly one of lessonId /
  * courseId must be set. The author must pass the read/write gate.
  */
-export function addComment(
-  userId: number,
-  lessonId: number | null,
-  courseId: number | null,
-  body: string
-) {
+export function addComment(opts: {
+  userId: number;
+  lessonId: number | null;
+  courseId: number | null;
+  body: string;
+}) {
+  const { userId, lessonId, courseId, body } = opts;
   const trimmed = validateBody(body);
-  const gateCourseId = resolveCourseId(lessonId, courseId);
+  const gateCourseId = resolveCourseId({ lessonId, courseId });
 
-  if (!canCommentOn(userId, gateCourseId)) {
+  if (!canCommentOn({ userId, courseId: gateCourseId })) {
     throw new Error("Not allowed to comment on this course");
   }
 
@@ -108,11 +115,12 @@ export function addComment(
  * Reply to an existing comment. The reply inherits its parent's target
  * (lesson or course); the author must pass the gate for that course.
  */
-export function replyToComment(
-  userId: number,
-  parentId: number,
-  body: string
-) {
+export function replyToComment(opts: {
+  userId: number;
+  parentId: number;
+  body: string;
+}) {
+  const { userId, parentId, body } = opts;
   const trimmed = validateBody(body);
 
   const parent = db
@@ -124,8 +132,11 @@ export function replyToComment(
     throw new Error("Parent comment not found");
   }
 
-  const gateCourseId = resolveCourseId(parent.lessonId, parent.courseId);
-  if (!canCommentOn(userId, gateCourseId)) {
+  const gateCourseId = resolveCourseId({
+    lessonId: parent.lessonId,
+    courseId: parent.courseId,
+  });
+  if (!canCommentOn({ userId, courseId: gateCourseId })) {
     throw new Error("Not allowed to comment on this course");
   }
 
@@ -146,7 +157,12 @@ export function replyToComment(
  * Edit a comment's body. Only the author may edit, and only while the comment
  * is not deleted. Bumps updatedAt; the UI shows an "edited" marker.
  */
-export function editComment(userId: number, commentId: number, body: string) {
+export function editComment(opts: {
+  userId: number;
+  commentId: number;
+  body: string;
+}) {
+  const { userId, commentId, body } = opts;
   const trimmed = validateBody(body);
 
   const comment = db
@@ -177,7 +193,11 @@ export function editComment(userId: number, commentId: number, body: string) {
  * the body renders as "[deleted]". Permitted for the author, the course's
  * instructor, and admins (the moderation primitive).
  */
-export function softDeleteComment(userId: number, commentId: number) {
+export function softDeleteComment(opts: {
+  userId: number;
+  commentId: number;
+}) {
+  const { userId, commentId } = opts;
   const comment = db
     .select()
     .from(comments)
@@ -188,7 +208,10 @@ export function softDeleteComment(userId: number, commentId: number) {
   }
 
   const isAuthor = comment.userId === userId;
-  const gateCourseId = resolveCourseId(comment.lessonId, comment.courseId);
+  const gateCourseId = resolveCourseId({
+    lessonId: comment.lessonId,
+    courseId: comment.courseId,
+  });
   const course = getCourseById(gateCourseId);
   const isInstructor = course?.instructorId === userId;
   const user = db.select().from(users).where(eq(users.id, userId)).get();
@@ -233,12 +256,13 @@ export type CommentNode = {
  * ordered newest-first; replies oldest-first within each parent. Soft-deleted
  * comments are kept (to preserve thread structure) but their body is nulled.
  */
-export function getCommentTree(
-  lessonId: number | null,
-  courseId: number | null
-): CommentNode[] {
+export function getCommentTree(opts: {
+  lessonId: number | null;
+  courseId: number | null;
+}): CommentNode[] {
+  const { lessonId, courseId } = opts;
   // Enforce the exactly-one-target invariant on reads too.
-  resolveCourseId(lessonId, courseId);
+  resolveCourseId({ lessonId, courseId });
 
   const rows = db
     .select({

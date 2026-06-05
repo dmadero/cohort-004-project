@@ -142,33 +142,36 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lessonProgressMap: Record<number, string> = {};
 
   if (currentUserId) {
-    enrolled = isUserEnrolled(currentUserId, course.id);
+    enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
 
     if (enrolled) {
       // Mark lesson as in-progress when viewed
-      markLessonInProgress(currentUserId, lessonId);
-      const progress = getLessonProgress(currentUserId, lessonId);
+      markLessonInProgress({ userId: currentUserId, lessonId });
+      const progress = getLessonProgress({ userId: currentUserId, lessonId });
       lessonStatus = progress?.status ?? null;
 
       // Get progress for all lessons in course (for curriculum sidebar)
-      const progressRecords = getLessonProgressForCourse(
-        currentUserId,
-        course.id
-      );
+      const progressRecords = getLessonProgressForCourse({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
 
       // Get video watch state for resume and progress display
       if (lesson.videoUrl) {
-        lastWatchPosition = getLastWatchPosition(currentUserId, lessonId);
+        lastWatchPosition = getLastWatchPosition({
+          userId: currentUserId,
+          lessonId,
+        });
         const videoDurationSeconds = (lesson.durationMinutes ?? 0) * 60;
         if (videoDurationSeconds > 0) {
-          watchProgress = calculateWatchProgress(
-            currentUserId,
+          watchProgress = calculateWatchProgress({
+            userId: currentUserId,
             lessonId,
-            videoDurationSeconds
-          );
+            videoDurationSeconds,
+          });
         }
       }
     }
@@ -180,7 +183,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let pppPurchaseCountry: string | null = null;
 
   if (enrolled && currentUserId) {
-    const purchase = findPurchase(currentUserId, course.id);
+    const purchase = findPurchase({
+      userId: currentUserId,
+      courseId: course.id,
+    });
     const currentCountry = await resolveCountry(request);
     const pppResult = checkPppAccess(
       course.price,
@@ -243,7 +249,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }
 
     if (currentUserId) {
-      const best = getBestAttempt(currentUserId, quizRecord.id);
+      const best = getBestAttempt({
+        userId: currentUserId,
+        quizId: quizRecord.id,
+      });
       if (best) {
         bestAttempt = { score: best.score, passed: best.passed };
       }
@@ -251,13 +260,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   // Lesson discussion — gated to the course's participants (hidden otherwise).
-  const commentSection = await loadCommentSection(
+  const commentSection = await loadCommentSection({
     currentUserId,
-    lesson.id,
-    null,
-    course.id,
-    course.instructorId
-  );
+    lessonId: lesson.id,
+    courseId: null,
+    gateCourseId: course.id,
+    courseInstructorId: course.instructorId,
+  });
 
   return {
     course: {
@@ -313,7 +322,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const intent = formData.get("intent");
 
   if (intent === "mark-complete") {
-    markLessonComplete(currentUserId, lessonId);
+    markLessonComplete({ userId: currentUserId, lessonId });
     return { success: true };
   }
 
@@ -335,7 +344,11 @@ export async function action({ params, request }: Route.ActionArgs) {
       }
     }
 
-    const result = computeResult(currentUserId, quizId, selectedAnswers);
+    const result = computeResult({
+      userId: currentUserId,
+      quizId,
+      selectedAnswers,
+    });
     if (!result) {
       throw data("Failed to score quiz", { status: 500 });
     }

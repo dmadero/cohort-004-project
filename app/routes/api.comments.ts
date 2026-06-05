@@ -42,24 +42,24 @@ export async function action({ request }: Route.ActionArgs) {
         const lessonId = parseOptionalId(formData.get("lessonId"));
         const courseId = parseOptionalId(formData.get("courseId"));
         const body = bodySchema.parse(formData.get("body"));
-        addComment(currentUserId, lessonId, courseId, body);
+        addComment({ userId: currentUserId, lessonId, courseId, body });
         break;
       }
       case "reply": {
         const parentId = idSchema.parse(formData.get("parentId"));
         const body = bodySchema.parse(formData.get("body"));
-        replyToComment(currentUserId, parentId, body);
+        replyToComment({ userId: currentUserId, parentId, body });
         break;
       }
       case "edit": {
         const commentId = idSchema.parse(formData.get("commentId"));
         const body = bodySchema.parse(formData.get("body"));
-        editComment(currentUserId, commentId, body);
+        editComment({ userId: currentUserId, commentId, body });
         break;
       }
       case "delete": {
         const commentId = idSchema.parse(formData.get("commentId"));
-        softDeleteComment(currentUserId, commentId);
+        softDeleteComment({ userId: currentUserId, commentId });
         break;
       }
       default:

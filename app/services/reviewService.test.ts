@@ -35,7 +35,12 @@ describe("reviewService", () => {
 
   describe("hasUserCompletedCourse", () => {
     it("is false when not enrolled", () => {
-      expect(hasUserCompletedCourse(base.user.id, base.course.id)).toBe(false);
+      expect(
+        hasUserCompletedCourse({
+          userId: base.user.id,
+          courseId: base.course.id,
+        })
+      ).toBe(false);
     });
 
     it("is false when enrolled but not completed", () => {
@@ -43,12 +48,22 @@ describe("reviewService", () => {
         .insert(schema.enrollments)
         .values({ userId: base.user.id, courseId: base.course.id })
         .run();
-      expect(hasUserCompletedCourse(base.user.id, base.course.id)).toBe(false);
+      expect(
+        hasUserCompletedCourse({
+          userId: base.user.id,
+          courseId: base.course.id,
+        })
+      ).toBe(false);
     });
 
     it("is true when the enrollment is completed", () => {
       enrollAndComplete(base.user.id, base.course.id);
-      expect(hasUserCompletedCourse(base.user.id, base.course.id)).toBe(true);
+      expect(
+        hasUserCompletedCourse({
+          userId: base.user.id,
+          courseId: base.course.id,
+        })
+      ).toBe(true);
     });
   });
 
@@ -56,7 +71,11 @@ describe("reviewService", () => {
     it("creates a review for a completed enrollment", () => {
       enrollAndComplete(base.user.id, base.course.id);
 
-      const review = upsertReview(base.user.id, base.course.id, 4);
+      const review = upsertReview({
+        userId: base.user.id,
+        courseId: base.course.id,
+        rating: 4,
+      });
 
       expect(review).toBeDefined();
       expect(review.userId).toBe(base.user.id);
@@ -67,8 +86,16 @@ describe("reviewService", () => {
     it("updates the existing review instead of creating a duplicate (upsert)", () => {
       enrollAndComplete(base.user.id, base.course.id);
 
-      const first = upsertReview(base.user.id, base.course.id, 3);
-      const second = upsertReview(base.user.id, base.course.id, 5);
+      const first = upsertReview({
+        userId: base.user.id,
+        courseId: base.course.id,
+        rating: 3,
+      });
+      const second = upsertReview({
+        userId: base.user.id,
+        courseId: base.course.id,
+        rating: 5,
+      });
 
       expect(second.id).toBe(first.id);
       expect(second.rating).toBe(5);
@@ -80,29 +107,33 @@ describe("reviewService", () => {
 
     it("rejects a rating below 1", () => {
       enrollAndComplete(base.user.id, base.course.id);
-      expect(() => upsertReview(base.user.id, base.course.id, 0)).toThrowError(
-        "Rating must be an integer between 1 and 5"
-      );
+      expect(() =>
+        upsertReview({ userId: base.user.id, courseId: base.course.id, rating: 0 })
+      ).toThrowError("Rating must be an integer between 1 and 5");
     });
 
     it("rejects a rating above 5", () => {
       enrollAndComplete(base.user.id, base.course.id);
-      expect(() => upsertReview(base.user.id, base.course.id, 6)).toThrowError(
-        "Rating must be an integer between 1 and 5"
-      );
+      expect(() =>
+        upsertReview({ userId: base.user.id, courseId: base.course.id, rating: 6 })
+      ).toThrowError("Rating must be an integer between 1 and 5");
     });
 
     it("rejects a non-integer rating", () => {
       enrollAndComplete(base.user.id, base.course.id);
-      expect(() => upsertReview(base.user.id, base.course.id, 4.5)).toThrowError(
-        "Rating must be an integer between 1 and 5"
-      );
+      expect(() =>
+        upsertReview({
+          userId: base.user.id,
+          courseId: base.course.id,
+          rating: 4.5,
+        })
+      ).toThrowError("Rating must be an integer between 1 and 5");
     });
 
     it("rejects rating when the user has not enrolled", () => {
-      expect(() => upsertReview(base.user.id, base.course.id, 4)).toThrowError(
-        "Must complete the course before rating it"
-      );
+      expect(() =>
+        upsertReview({ userId: base.user.id, courseId: base.course.id, rating: 4 })
+      ).toThrowError("Must complete the course before rating it");
     });
 
     it("rejects rating when the user enrolled but has not completed", () => {
@@ -111,24 +142,30 @@ describe("reviewService", () => {
         .values({ userId: base.user.id, courseId: base.course.id })
         .run();
 
-      expect(() => upsertReview(base.user.id, base.course.id, 4)).toThrowError(
-        "Must complete the course before rating it"
-      );
+      expect(() =>
+        upsertReview({ userId: base.user.id, courseId: base.course.id, rating: 4 })
+      ).toThrowError("Must complete the course before rating it");
     });
   });
 
   describe("getReviewByUserAndCourse", () => {
     it("returns undefined when no review exists", () => {
       expect(
-        getReviewByUserAndCourse(base.user.id, base.course.id)
+        getReviewByUserAndCourse({
+          userId: base.user.id,
+          courseId: base.course.id,
+        })
       ).toBeUndefined();
     });
 
     it("returns the user's review when it exists", () => {
       enrollAndComplete(base.user.id, base.course.id);
-      upsertReview(base.user.id, base.course.id, 2);
+      upsertReview({ userId: base.user.id, courseId: base.course.id, rating: 2 });
 
-      const review = getReviewByUserAndCourse(base.user.id, base.course.id);
+      const review = getReviewByUserAndCourse({
+        userId: base.user.id,
+        courseId: base.course.id,
+      });
       expect(review?.rating).toBe(2);
     });
   });
@@ -154,8 +191,8 @@ describe("reviewService", () => {
       enrollAndComplete(base.user.id, base.course.id);
       enrollAndComplete(other.id, base.course.id);
 
-      upsertReview(base.user.id, base.course.id, 2);
-      upsertReview(other.id, base.course.id, 4);
+      upsertReview({ userId: base.user.id, courseId: base.course.id, rating: 2 });
+      upsertReview({ userId: other.id, courseId: base.course.id, rating: 4 });
 
       const summary = getCourseRatingSummary(base.course.id);
       expect(summary.count).toBe(2);

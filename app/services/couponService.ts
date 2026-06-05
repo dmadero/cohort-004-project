@@ -11,12 +11,13 @@ function generateCode(): string {
   return crypto.randomBytes(12).toString("base64url");
 }
 
-export function generateCoupons(
-  teamId: number,
-  courseId: number,
-  purchaseId: number,
-  quantity: number
-) {
+export function generateCoupons(opts: {
+  teamId: number;
+  courseId: number;
+  purchaseId: number;
+  quantity: number;
+}) {
+  const { teamId, courseId, purchaseId, quantity } = opts;
   const created: (typeof coupons.$inferSelect)[] = [];
   for (let i = 0; i < quantity; i++) {
     const coupon = db
@@ -38,7 +39,8 @@ export function getCouponByCode(code: string) {
   return db.select().from(coupons).where(eq(coupons.code, code)).get();
 }
 
-export function getCouponsForTeam(teamId: number, courseId?: number) {
+export function getCouponsForTeam(opts: { teamId: number; courseId?: number }) {
+  const { teamId, courseId } = opts;
   if (courseId !== undefined) {
     return db
       .select()
@@ -53,11 +55,12 @@ export type RedeemResult =
   | { ok: true; enrollment: typeof enrollments.$inferSelect }
   | { ok: false; error: string };
 
-export function redeemCoupon(
-  code: string,
-  userId: number,
-  userCountry: string
-): RedeemResult {
+export function redeemCoupon(opts: {
+  code: string;
+  userId: number;
+  userCountry: string;
+}): RedeemResult {
+  const { code, userId, userCountry } = opts;
   // 1. Find the coupon
   const coupon = getCouponByCode(code);
   if (!coupon) {

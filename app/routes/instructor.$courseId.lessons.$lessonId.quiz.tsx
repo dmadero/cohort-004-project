@@ -237,11 +237,11 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
 
     // Create the quiz
-    const quiz = createQuiz(
+    const quiz = createQuiz({
       lessonId,
-      wizardData.title.trim(),
-      wizardData.passingScore / 100
-    );
+      title: wizardData.title.trim(),
+      passingScore: wizardData.passingScore / 100,
+    });
 
     // Create questions and options
     for (let qi = 0; qi < wizardData.questions.length; qi++) {

@@ -23,7 +23,14 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const courses = buildCourseQuery(null, null, CourseStatus.Published, "newest", 50, 0);
+  const courses = buildCourseQuery({
+    search: null,
+    category: null,
+    status: CourseStatus.Published,
+    sortBy: "newest",
+    limit: 50,
+    offset: 0,
+  });
   const featured = courses.slice(0, 3).map((course) => ({
     ...course,
     lessonCount: getLessonCountForCourse(course.id),

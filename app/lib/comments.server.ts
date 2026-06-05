@@ -29,14 +29,19 @@ const EMPTY_SECTION: CommentSection = {
  * target, that's the lesson's course). The discussion is hidden entirely from
  * anonymous and non-enrolled visitors.
  */
-export async function loadCommentSection(
-  currentUserId: number | null,
-  lessonId: number | null,
-  courseId: number | null,
-  gateCourseId: number,
-  courseInstructorId: number
-): Promise<CommentSection> {
-  if (currentUserId == null || !canCommentOn(currentUserId, gateCourseId)) {
+export async function loadCommentSection(opts: {
+  currentUserId: number | null;
+  lessonId: number | null;
+  courseId: number | null;
+  gateCourseId: number;
+  courseInstructorId: number;
+}): Promise<CommentSection> {
+  const { currentUserId, lessonId, courseId, gateCourseId, courseInstructorId } =
+    opts;
+  if (
+    currentUserId == null ||
+    !canCommentOn({ userId: currentUserId, courseId: gateCourseId })
+  ) {
     return EMPTY_SECTION;
   }
 
@@ -76,7 +81,7 @@ export async function loadCommentSection(
     };
   };
 
-  const tree = getCommentTree(lessonId, courseId);
+  const tree = getCommentTree({ lessonId, courseId });
   const comments: RenderedComment[] = [];
   for (const node of tree) {
     comments.push(await render(node));

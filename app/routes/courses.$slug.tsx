@@ -84,24 +84,37 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let myRating: number | null = null;
 
   if (currentUserId) {
-    enrolled = isUserEnrolled(currentUserId, course.id);
-    completed = hasUserCompletedCourse(currentUserId, course.id);
+    enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
+    completed = hasUserCompletedCourse({
+      userId: currentUserId,
+      courseId: course.id,
+    });
 
     if (enrolled) {
-      progress = calculateProgress(currentUserId, course.id, false, false);
+      progress = calculateProgress({
+        userId: currentUserId,
+        courseId: course.id,
+        includeQuizzes: false,
+        weightByDuration: false,
+      });
 
-      const progressRecords = getLessonProgressForCourse(
-        currentUserId,
-        course.id
-      );
+      const progressRecords = getLessonProgressForCourse({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
 
-      const nextLesson = getNextIncompleteLesson(currentUserId, course.id);
+      const nextLesson = getNextIncompleteLesson({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       nextLessonId = nextLesson?.id ?? null;
 
-      myRating = getReviewByUserAndCourse(currentUserId, course.id)?.rating ?? null;
+      myRating =
+        getReviewByUserAndCourse({ userId: currentUserId, courseId: course.id })
+          ?.rating ?? null;
     }
   }
 
@@ -119,13 +132,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const tierInfo = getCountryTierInfo(country);
 
   // Course-level discussion — gated to participants (hidden otherwise).
-  const commentSection = await loadCommentSection(
+  const commentSection = await loadCommentSection({
     currentUserId,
-    null,
-    course.id,
-    course.id,
-    courseWithDetails.instructorId
-  );
+    lessonId: null,
+    courseId: course.id,
+    gateCourseId: course.id,
+    courseInstructorId: courseWithDetails.instructorId,
+  });
 
   return {
     course: courseWithDetails,

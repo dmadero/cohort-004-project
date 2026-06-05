@@ -4,7 +4,6 @@ import { modules, lessons } from "~/db/schema";
 
 // ─── Module Service ───
 // Handles module CRUD and reordering within courses.
-// Uses positional parameters (project convention).
 
 export function getModuleById(id: number) {
   return db.select().from(modules).where(eq(modules.id, id)).get();
@@ -79,7 +78,11 @@ export function getModuleCount(courseId: number) {
 
 // ─── Reordering ───
 
-export function moveModuleToPosition(moduleId: number, newPosition: number) {
+export function moveModuleToPosition(opts: {
+  moduleId: number;
+  newPosition: number;
+}) {
+  const { moduleId, newPosition } = opts;
   const mod = getModuleById(moduleId);
   if (!mod) return null;
 
@@ -120,7 +123,11 @@ export function moveModuleToPosition(moduleId: number, newPosition: number) {
     .get();
 }
 
-export function swapModulePositions(moduleIdA: number, moduleIdB: number) {
+export function swapModulePositions(opts: {
+  moduleIdA: number;
+  moduleIdB: number;
+}) {
+  const { moduleIdA, moduleIdB } = opts;
   const modA = getModuleById(moduleIdA);
   const modB = getModuleById(moduleIdB);
   if (!modA || !modB) return null;

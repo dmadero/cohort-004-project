@@ -72,13 +72,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lessonProgressMap: Record<number, string> = {};
 
   if (currentUserId) {
-    enrolled = isUserEnrolled(currentUserId, course.id);
+    enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
 
     if (enrolled) {
-      const progressRecords = getLessonProgressForCourse(
-        currentUserId,
-        course.id
-      );
+      const progressRecords = getLessonProgressForCourse({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }

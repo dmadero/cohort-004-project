@@ -52,11 +52,15 @@ describe("commentService", () => {
   describe("canCommentOn", () => {
     it("allows an enrolled student", () => {
       enroll(base.user.id, base.course.id);
-      expect(canCommentOn(base.user.id, base.course.id)).toBe(true);
+      expect(
+        canCommentOn({ userId: base.user.id, courseId: base.course.id })
+      ).toBe(true);
     });
 
     it("allows the course's instructor (who is not enrolled)", () => {
-      expect(canCommentOn(base.instructor.id, base.course.id)).toBe(true);
+      expect(
+        canCommentOn({ userId: base.instructor.id, courseId: base.course.id })
+      ).toBe(true);
     });
 
     it("allows an admin", () => {
@@ -69,11 +73,15 @@ describe("commentService", () => {
         })
         .returning()
         .get();
-      expect(canCommentOn(admin.id, base.course.id)).toBe(true);
+      expect(
+        canCommentOn({ userId: admin.id, courseId: base.course.id })
+      ).toBe(true);
     });
 
     it("rejects a non-enrolled, non-instructor user", () => {
-      expect(canCommentOn(base.user.id, base.course.id)).toBe(false);
+      expect(
+        canCommentOn({ userId: base.user.id, courseId: base.course.id })
+      ).toBe(false);
     });
   });
 
@@ -81,7 +89,12 @@ describe("commentService", () => {
     it("creates a top-level comment on a course for an enrolled student", () => {
       enroll(base.user.id, base.course.id);
 
-      const comment = addComment(base.user.id, null, base.course.id, "Hello");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "Hello",
+      });
 
       expect(comment.id).toBeDefined();
       expect(comment.userId).toBe(base.user.id);
@@ -96,7 +109,12 @@ describe("commentService", () => {
       const lesson = seedLesson(base.course.id);
       enroll(base.user.id, base.course.id);
 
-      const comment = addComment(base.user.id, lesson.id, null, "On a lesson");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        courseId: null,
+        body: "On a lesson",
+      });
 
       expect(comment.lessonId).toBe(lesson.id);
       expect(comment.courseId).toBeNull();
@@ -104,35 +122,60 @@ describe("commentService", () => {
 
     it("trims the body before storing", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "  hi  ");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "  hi  ",
+      });
       expect(comment.body).toBe("hi");
     });
 
     it("rejects when neither lesson nor course is targeted", () => {
       enroll(base.user.id, base.course.id);
-      expect(() => addComment(base.user.id, null, null, "Hello")).toThrowError(
-        "exactly one"
-      );
+      expect(() =>
+        addComment({
+          userId: base.user.id,
+          lessonId: null,
+          courseId: null,
+          body: "Hello",
+        })
+      ).toThrowError("exactly one");
     });
 
     it("rejects when both lesson and course are targeted", () => {
       const lesson = seedLesson(base.course.id);
       enroll(base.user.id, base.course.id);
       expect(() =>
-        addComment(base.user.id, lesson.id, base.course.id, "Hello")
+        addComment({
+          userId: base.user.id,
+          lessonId: lesson.id,
+          courseId: base.course.id,
+          body: "Hello",
+        })
       ).toThrowError("exactly one");
     });
 
     it("rejects a user who cannot comment on the course", () => {
       expect(() =>
-        addComment(base.user.id, null, base.course.id, "Hello")
+        addComment({
+          userId: base.user.id,
+          lessonId: null,
+          courseId: base.course.id,
+          body: "Hello",
+        })
       ).toThrowError("Not allowed");
     });
 
     it("rejects an empty / whitespace-only body", () => {
       enroll(base.user.id, base.course.id);
       expect(() =>
-        addComment(base.user.id, null, base.course.id, "   ")
+        addComment({
+          userId: base.user.id,
+          lessonId: null,
+          courseId: base.course.id,
+          body: "   ",
+        })
       ).toThrowError("cannot be empty");
     });
 
@@ -140,7 +183,12 @@ describe("commentService", () => {
       enroll(base.user.id, base.course.id);
       const tooLong = "a".repeat(5001);
       expect(() =>
-        addComment(base.user.id, null, base.course.id, tooLong)
+        addComment({
+          userId: base.user.id,
+          lessonId: null,
+          courseId: base.course.id,
+          body: tooLong,
+        })
       ).toThrowError("cannot exceed");
     });
   });
@@ -148,10 +196,20 @@ describe("commentService", () => {
   describe("getCommentTree", () => {
     it("returns top-level comments newest-first with author info", () => {
       enroll(base.user.id, base.course.id);
-      const first = addComment(base.user.id, null, base.course.id, "First");
-      const second = addComment(base.user.id, null, base.course.id, "Second");
+      const first = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "First",
+      });
+      const second = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "Second",
+      });
 
-      const tree = getCommentTree(null, base.course.id);
+      const tree = getCommentTree({ lessonId: null, courseId: base.course.id });
 
       expect(tree.map((c) => c.id)).toEqual([second.id, first.id]);
       expect(tree[0].authorName).toBe(base.user.name);
@@ -162,11 +220,24 @@ describe("commentService", () => {
     it("scopes the tree to the requested target", () => {
       const lesson = seedLesson(base.course.id);
       enroll(base.user.id, base.course.id);
-      addComment(base.user.id, lesson.id, null, "On lesson");
-      addComment(base.user.id, null, base.course.id, "On course");
+      addComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        courseId: null,
+        body: "On lesson",
+      });
+      addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "On course",
+      });
 
-      const lessonTree = getCommentTree(lesson.id, null);
-      const courseTree = getCommentTree(null, base.course.id);
+      const lessonTree = getCommentTree({ lessonId: lesson.id, courseId: null });
+      const courseTree = getCommentTree({
+        lessonId: null,
+        courseId: base.course.id,
+      });
 
       expect(lessonTree).toHaveLength(1);
       expect(lessonTree[0].body).toBe("On lesson");
@@ -176,11 +247,24 @@ describe("commentService", () => {
 
     it("nests replies under their parent, oldest-first", () => {
       enroll(base.user.id, base.course.id);
-      const parent = addComment(base.user.id, null, base.course.id, "Q");
-      const r1 = replyToComment(base.user.id, parent.id, "A1");
-      const r2 = replyToComment(base.user.id, parent.id, "A2");
+      const parent = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "Q",
+      });
+      const r1 = replyToComment({
+        userId: base.user.id,
+        parentId: parent.id,
+        body: "A1",
+      });
+      const r2 = replyToComment({
+        userId: base.user.id,
+        parentId: parent.id,
+        body: "A2",
+      });
 
-      const tree = getCommentTree(null, base.course.id);
+      const tree = getCommentTree({ lessonId: null, courseId: base.course.id });
 
       expect(tree).toHaveLength(1);
       expect(tree[0].id).toBe(parent.id);
@@ -189,11 +273,24 @@ describe("commentService", () => {
 
     it("supports arbitrary nesting depth", () => {
       enroll(base.user.id, base.course.id);
-      const top = addComment(base.user.id, null, base.course.id, "top");
-      const mid = replyToComment(base.user.id, top.id, "mid");
-      const deep = replyToComment(base.user.id, mid.id, "deep");
+      const top = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "top",
+      });
+      const mid = replyToComment({
+        userId: base.user.id,
+        parentId: top.id,
+        body: "mid",
+      });
+      const deep = replyToComment({
+        userId: base.user.id,
+        parentId: mid.id,
+        body: "deep",
+      });
 
-      const tree = getCommentTree(null, base.course.id);
+      const tree = getCommentTree({ lessonId: null, courseId: base.course.id });
 
       expect(tree[0].replies[0].id).toBe(mid.id);
       expect(tree[0].replies[0].replies[0].id).toBe(deep.id);
@@ -204,9 +301,18 @@ describe("commentService", () => {
     it("inherits the parent's target and sets parentId", () => {
       const lesson = seedLesson(base.course.id);
       enroll(base.user.id, base.course.id);
-      const parent = addComment(base.user.id, lesson.id, null, "Q");
+      const parent = addComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        courseId: null,
+        body: "Q",
+      });
 
-      const reply = replyToComment(base.user.id, parent.id, "A");
+      const reply = replyToComment({
+        userId: base.user.id,
+        parentId: parent.id,
+        body: "A",
+      });
 
       expect(reply.parentId).toBe(parent.id);
       expect(reply.lessonId).toBe(lesson.id);
@@ -215,14 +321,19 @@ describe("commentService", () => {
 
     it("rejects a reply to a non-existent comment", () => {
       enroll(base.user.id, base.course.id);
-      expect(() => replyToComment(base.user.id, 9999, "A")).toThrowError(
-        "not found"
-      );
+      expect(() =>
+        replyToComment({ userId: base.user.id, parentId: 9999, body: "A" })
+      ).toThrowError("not found");
     });
 
     it("rejects a user who cannot comment on the course", () => {
       enroll(base.user.id, base.course.id);
-      const parent = addComment(base.user.id, null, base.course.id, "Q");
+      const parent = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "Q",
+      });
 
       const stranger = testDb
         .insert(schema.users)
@@ -235,7 +346,7 @@ describe("commentService", () => {
         .get();
 
       expect(() =>
-        replyToComment(stranger.id, parent.id, "A")
+        replyToComment({ userId: stranger.id, parentId: parent.id, body: "A" })
       ).toThrowError("Not allowed");
     });
   });
@@ -245,10 +356,19 @@ describe("commentService", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-06-02T10:00:00.000Z"));
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "typo");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "typo",
+      });
 
       vi.setSystemTime(new Date("2026-06-02T10:05:00.000Z"));
-      const edited = editComment(base.user.id, comment.id, "fixed");
+      const edited = editComment({
+        userId: base.user.id,
+        commentId: comment.id,
+        body: "fixed",
+      });
 
       expect(edited.body).toBe("fixed");
       expect(edited.updatedAt > comment.updatedAt).toBe(true);
@@ -257,28 +377,51 @@ describe("commentService", () => {
 
     it("validates the new body", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "ok");
-      expect(() => editComment(base.user.id, comment.id, "   ")).toThrowError(
-        "cannot be empty"
-      );
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "ok",
+      });
+      expect(() =>
+        editComment({ userId: base.user.id, commentId: comment.id, body: "   " })
+      ).toThrowError("cannot be empty");
     });
 
     it("rejects a non-author editing someone else's comment", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "mine");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "mine",
+      });
 
       expect(() =>
-        editComment(base.instructor.id, comment.id, "hijacked")
+        editComment({
+          userId: base.instructor.id,
+          commentId: comment.id,
+          body: "hijacked",
+        })
       ).toThrowError("only edit your own");
     });
 
     it("rejects editing a deleted comment", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "mine");
-      softDeleteComment(base.user.id, comment.id);
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "mine",
+      });
+      softDeleteComment({ userId: base.user.id, commentId: comment.id });
 
       expect(() =>
-        editComment(base.user.id, comment.id, "back")
+        editComment({
+          userId: base.user.id,
+          commentId: comment.id,
+          body: "back",
+        })
       ).toThrowError("deleted");
     });
   });
@@ -286,23 +429,44 @@ describe("commentService", () => {
   describe("softDeleteComment", () => {
     it("lets the author delete their own comment", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "bye");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "bye",
+      });
 
-      const deleted = softDeleteComment(base.user.id, comment.id);
+      const deleted = softDeleteComment({
+        userId: base.user.id,
+        commentId: comment.id,
+      });
       expect(deleted.deletedAt).not.toBeNull();
     });
 
     it("lets the course instructor delete any comment", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "student");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "student",
+      });
 
-      const deleted = softDeleteComment(base.instructor.id, comment.id);
+      const deleted = softDeleteComment({
+        userId: base.instructor.id,
+        commentId: comment.id,
+      });
       expect(deleted.deletedAt).not.toBeNull();
     });
 
     it("lets an admin delete any comment", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "student");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "student",
+      });
       const admin = testDb
         .insert(schema.users)
         .values({
@@ -313,13 +477,21 @@ describe("commentService", () => {
         .returning()
         .get();
 
-      const deleted = softDeleteComment(admin.id, comment.id);
+      const deleted = softDeleteComment({
+        userId: admin.id,
+        commentId: comment.id,
+      });
       expect(deleted.deletedAt).not.toBeNull();
     });
 
     it("rejects a different enrolled student deleting someone else's comment", () => {
       enroll(base.user.id, base.course.id);
-      const comment = addComment(base.user.id, null, base.course.id, "mine");
+      const comment = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "mine",
+      });
       const other = testDb
         .insert(schema.users)
         .values({
@@ -332,18 +504,27 @@ describe("commentService", () => {
       enroll(other.id, base.course.id);
 
       expect(() =>
-        softDeleteComment(other.id, comment.id)
+        softDeleteComment({ userId: other.id, commentId: comment.id })
       ).toThrowError("Not allowed");
     });
 
     it("preserves replies under a deleted parent and renders the parent as deleted", () => {
       enroll(base.user.id, base.course.id);
-      const parent = addComment(base.user.id, null, base.course.id, "question");
-      const reply = replyToComment(base.user.id, parent.id, "answer");
+      const parent = addComment({
+        userId: base.user.id,
+        lessonId: null,
+        courseId: base.course.id,
+        body: "question",
+      });
+      const reply = replyToComment({
+        userId: base.user.id,
+        parentId: parent.id,
+        body: "answer",
+      });
 
-      softDeleteComment(base.user.id, parent.id);
+      softDeleteComment({ userId: base.user.id, commentId: parent.id });
 
-      const tree = getCommentTree(null, base.course.id);
+      const tree = getCommentTree({ lessonId: null, courseId: base.course.id });
       expect(tree).toHaveLength(1);
       expect(tree[0].id).toBe(parent.id);
       expect(tree[0].deletedAt).not.toBeNull();

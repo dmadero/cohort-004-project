@@ -71,7 +71,7 @@ describe("progressService", () => {
     it("marks a lesson as completed with a new progress record", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      const progress = markLessonComplete(base.user.id, lessons[0].id);
+      const progress = markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(progress).toBeDefined();
       expect(progress.userId).toBe(base.user.id);
@@ -84,8 +84,8 @@ describe("progressService", () => {
     it("updates an existing in-progress record to completed", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonInProgress(base.user.id, lessons[0].id);
-      const progress = markLessonComplete(base.user.id, lessons[0].id);
+      markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
+      const progress = markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(progress.status).toBe(schema.LessonProgressStatus.Completed);
       expect(progress.completedAt).not.toBeNull();
@@ -94,8 +94,8 @@ describe("progressService", () => {
     it("is idempotent — completing an already completed lesson still returns completed", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      const progress = markLessonComplete(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      const progress = markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(progress.status).toBe(schema.LessonProgressStatus.Completed);
     });
@@ -105,7 +105,7 @@ describe("progressService", () => {
     it("marks a lesson as in-progress with a new progress record", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      const progress = markLessonInProgress(base.user.id, lessons[0].id);
+      const progress = markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(progress.status).toBe(schema.LessonProgressStatus.InProgress);
       expect(progress.completedAt).toBeNull();
@@ -114,8 +114,8 @@ describe("progressService", () => {
     it("does not downgrade a completed lesson back to in-progress", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      const progress = markLessonInProgress(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      const progress = markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(progress.status).toBe(schema.LessonProgressStatus.Completed);
     });
@@ -124,8 +124,8 @@ describe("progressService", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
       // Create initial in-progress, then mark in-progress again (no-op for in_progress)
-      const first = markLessonInProgress(base.user.id, lessons[0].id);
-      const second = markLessonInProgress(base.user.id, lessons[0].id);
+      const first = markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
+      const second = markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(second.status).toBe(schema.LessonProgressStatus.InProgress);
       expect(second.id).toBe(first.id);
@@ -136,9 +136,9 @@ describe("progressService", () => {
     it("returns the progress record for a user/lesson pair", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonComplete(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
-      const progress = getLessonProgress(base.user.id, lessons[0].id);
+      const progress = getLessonProgress({ userId: base.user.id, lessonId: lessons[0].id });
       expect(progress).toBeDefined();
       expect(progress!.status).toBe(schema.LessonProgressStatus.Completed);
     });
@@ -146,7 +146,7 @@ describe("progressService", () => {
     it("returns undefined when no progress exists", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      const progress = getLessonProgress(base.user.id, lessons[0].id);
+      const progress = getLessonProgress({ userId: base.user.id, lessonId: lessons[0].id });
       expect(progress).toBeUndefined();
     });
   });
@@ -155,10 +155,10 @@ describe("progressService", () => {
     it("returns all lesson progress records for a user in a course", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      markLessonInProgress(base.user.id, lessons[1].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      markLessonInProgress({ userId: base.user.id, lessonId: lessons[1].id });
 
-      const progress = getLessonProgressForCourse(base.user.id, base.course.id);
+      const progress = getLessonProgressForCourse({ userId: base.user.id, courseId: base.course.id });
       expect(progress).toHaveLength(2);
     });
 
@@ -177,14 +177,14 @@ describe("progressService", () => {
         .returning()
         .get();
 
-      const progress = getLessonProgressForCourse(base.user.id, emptyCourse.id);
+      const progress = getLessonProgressForCourse({ userId: base.user.id, courseId: emptyCourse.id });
       expect(progress).toHaveLength(0);
     });
 
     it("returns empty array when user has no progress", () => {
       createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      const progress = getLessonProgressForCourse(base.user.id, base.course.id);
+      const progress = getLessonProgressForCourse({ userId: base.user.id, courseId: base.course.id });
       expect(progress).toHaveLength(0);
     });
   });
@@ -193,17 +193,17 @@ describe("progressService", () => {
     it("deletes the progress record for a user/lesson pair", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      const deleted = resetLessonProgress(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      const deleted = resetLessonProgress({ userId: base.user.id, lessonId: lessons[0].id });
 
       expect(deleted).toBeDefined();
-      expect(getLessonProgress(base.user.id, lessons[0].id)).toBeUndefined();
+      expect(getLessonProgress({ userId: base.user.id, lessonId: lessons[0].id })).toBeUndefined();
     });
 
     it("returns undefined when no progress exists to reset", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      const deleted = resetLessonProgress(base.user.id, lessons[0].id);
+      const deleted = resetLessonProgress({ userId: base.user.id, lessonId: lessons[0].id });
       expect(deleted).toBeUndefined();
     });
   });
@@ -212,23 +212,23 @@ describe("progressService", () => {
     it("returns true when lesson is completed", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonComplete(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
-      expect(isLessonCompleted(base.user.id, lessons[0].id)).toBe(true);
+      expect(isLessonCompleted({ userId: base.user.id, lessonId: lessons[0].id })).toBe(true);
     });
 
     it("returns false when lesson is in-progress", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      markLessonInProgress(base.user.id, lessons[0].id);
+      markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
 
-      expect(isLessonCompleted(base.user.id, lessons[0].id)).toBe(false);
+      expect(isLessonCompleted({ userId: base.user.id, lessonId: lessons[0].id })).toBe(false);
     });
 
     it("returns false when no progress exists", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 1);
 
-      expect(isLessonCompleted(base.user.id, lessons[0].id)).toBe(false);
+      expect(isLessonCompleted({ userId: base.user.id, lessonId: lessons[0].id })).toBe(false);
     });
   });
 
@@ -247,14 +247,14 @@ describe("progressService", () => {
         .returning()
         .get();
 
-      const progress = calculateProgress(base.user.id, emptyCourse.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: emptyCourse.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(0);
     });
 
     it("returns 0 when no lessons are completed", () => {
       createModuleWithLessons(base.course.id, "Module 1", 1, 4);
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(0);
     });
 
@@ -262,30 +262,30 @@ describe("progressService", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
       for (const lesson of lessons) {
-        markLessonComplete(base.user.id, lesson.id);
+        markLessonComplete({ userId: base.user.id, lessonId: lesson.id });
       }
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(100);
     });
 
     it("calculates correct percentage for partial completion", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 4);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      markLessonComplete(base.user.id, lessons[1].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[1].id });
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(50); // 2/4 = 50%
     });
 
     it("only counts completed lessons, not in-progress ones", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 4);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      markLessonInProgress(base.user.id, lessons[1].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      markLessonInProgress({ userId: base.user.id, lessonId: lessons[1].id });
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(25); // 1/4 = 25%
     });
 
@@ -293,19 +293,19 @@ describe("progressService", () => {
       const m1 = createModuleWithLessons(base.course.id, "Module 1", 1, 2);
       const m2 = createModuleWithLessons(base.course.id, "Module 2", 2, 2);
 
-      markLessonComplete(base.user.id, m1.lessons[0].id);
-      markLessonComplete(base.user.id, m2.lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: m1.lessons[0].id });
+      markLessonComplete({ userId: base.user.id, lessonId: m2.lessons[0].id });
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(50); // 2/4 = 50%
     });
 
     it("rounds progress to nearest integer", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      markLessonComplete(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, false);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: false });
       expect(progress).toBe(33); // 1/3 = 33.33... → 33
     });
   });
@@ -331,9 +331,9 @@ describe("progressService", () => {
         .get();
 
       // Complete only the short lesson (10 out of 40 total minutes)
-      markLessonComplete(base.user.id, lesson1.id);
+      markLessonComplete({ userId: base.user.id, lessonId: lesson1.id });
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, true);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: true });
       expect(progress).toBe(25); // 10/40 = 25%
     });
 
@@ -357,9 +357,9 @@ describe("progressService", () => {
         .get();
 
       // Complete only the timed lesson (9 out of 10 total minutes)
-      markLessonComplete(base.user.id, lesson1.id);
+      markLessonComplete({ userId: base.user.id, lessonId: lesson1.id });
 
-      const progress = calculateProgress(base.user.id, base.course.id, false, true);
+      const progress = calculateProgress({ userId: base.user.id, courseId: base.course.id, includeQuizzes: false, weightByDuration: true });
       expect(progress).toBe(90); // 9/10 = 90%
     });
 
@@ -377,7 +377,7 @@ describe("progressService", () => {
         .returning()
         .get();
 
-      const progress = calculateProgress(base.user.id, emptyCourse.id, false, true);
+      const progress = calculateProgress({ userId: base.user.id, courseId: emptyCourse.id, includeQuizzes: false, weightByDuration: true });
       expect(progress).toBe(0);
     });
   });
@@ -386,29 +386,29 @@ describe("progressService", () => {
     it("returns count of completed lessons in a course", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      markLessonComplete(base.user.id, lessons[1].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[1].id });
 
-      expect(getCompletedLessonCount(base.user.id, base.course.id)).toBe(2);
+      expect(getCompletedLessonCount({ userId: base.user.id, courseId: base.course.id })).toBe(2);
     });
 
     it("does not count in-progress lessons", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      markLessonComplete(base.user.id, lessons[0].id);
-      markLessonInProgress(base.user.id, lessons[1].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
+      markLessonInProgress({ userId: base.user.id, lessonId: lessons[1].id });
 
-      expect(getCompletedLessonCount(base.user.id, base.course.id)).toBe(1);
+      expect(getCompletedLessonCount({ userId: base.user.id, courseId: base.course.id })).toBe(1);
     });
 
     it("returns 0 when no lessons are completed", () => {
       createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      expect(getCompletedLessonCount(base.user.id, base.course.id)).toBe(0);
+      expect(getCompletedLessonCount({ userId: base.user.id, courseId: base.course.id })).toBe(0);
     });
 
     it("returns 0 for a course with no lessons", () => {
-      expect(getCompletedLessonCount(base.user.id, base.course.id)).toBe(0);
+      expect(getCompletedLessonCount({ userId: base.user.id, courseId: base.course.id })).toBe(0);
     });
   });
 
@@ -429,7 +429,7 @@ describe("progressService", () => {
     it("returns the first lesson when no progress exists", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      const next = getNextIncompleteLesson(base.user.id, base.course.id);
+      const next = getNextIncompleteLesson({ userId: base.user.id, courseId: base.course.id });
       expect(next).toBeDefined();
       expect(next!.id).toBe(lessons[0].id);
     });
@@ -437,9 +437,9 @@ describe("progressService", () => {
     it("returns the first incomplete lesson after completed ones", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      markLessonComplete(base.user.id, lessons[0].id);
+      markLessonComplete({ userId: base.user.id, lessonId: lessons[0].id });
 
-      const next = getNextIncompleteLesson(base.user.id, base.course.id);
+      const next = getNextIncompleteLesson({ userId: base.user.id, courseId: base.course.id });
       expect(next).toBeDefined();
       expect(next!.id).toBe(lessons[1].id);
     });
@@ -449,10 +449,10 @@ describe("progressService", () => {
       const m2 = createModuleWithLessons(base.course.id, "Module 2", 2, 2);
 
       // Complete all lessons in module 1
-      markLessonComplete(base.user.id, m1.lessons[0].id);
-      markLessonComplete(base.user.id, m1.lessons[1].id);
+      markLessonComplete({ userId: base.user.id, lessonId: m1.lessons[0].id });
+      markLessonComplete({ userId: base.user.id, lessonId: m1.lessons[1].id });
 
-      const next = getNextIncompleteLesson(base.user.id, base.course.id);
+      const next = getNextIncompleteLesson({ userId: base.user.id, courseId: base.course.id });
       expect(next).toBeDefined();
       expect(next!.id).toBe(m2.lessons[0].id);
     });
@@ -461,24 +461,24 @@ describe("progressService", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 2);
 
       for (const lesson of lessons) {
-        markLessonComplete(base.user.id, lesson.id);
+        markLessonComplete({ userId: base.user.id, lessonId: lesson.id });
       }
 
-      const next = getNextIncompleteLesson(base.user.id, base.course.id);
+      const next = getNextIncompleteLesson({ userId: base.user.id, courseId: base.course.id });
       expect(next).toBeNull();
     });
 
     it("returns null for a course with no modules", () => {
-      const next = getNextIncompleteLesson(base.user.id, base.course.id);
+      const next = getNextIncompleteLesson({ userId: base.user.id, courseId: base.course.id });
       expect(next).toBeNull();
     });
 
     it("treats in-progress lessons as incomplete", () => {
       const { lessons } = createModuleWithLessons(base.course.id, "Module 1", 1, 3);
 
-      markLessonInProgress(base.user.id, lessons[0].id);
+      markLessonInProgress({ userId: base.user.id, lessonId: lessons[0].id });
 
-      const next = getNextIncompleteLesson(base.user.id, base.course.id);
+      const next = getNextIncompleteLesson({ userId: base.user.id, courseId: base.course.id });
       expect(next).toBeDefined();
       expect(next!.id).toBe(lessons[0].id);
     });
