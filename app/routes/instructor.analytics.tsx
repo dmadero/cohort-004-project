@@ -1,6 +1,8 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/instructor.analytics";
 import { getCourseStats, getOverviewStats } from "~/services/analyticsService";
+import { resolveDateRange } from "~/lib/date-range";
+import { RangeSelector } from "~/components/range-selector";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -44,8 +46,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
+  // Period KPIs follow the URL range; the comparison table and top-courses
+  // ranking are structural and stay all-time (PRD time-filtering rules).
+  const dateRange = resolveDateRange({
+    range: new URL(request.url).searchParams.get("range"),
+    now: new Date(),
+  });
+
   return {
-    stats: getOverviewStats({ instructorId: currentUserId }),
+    dateRange,
+    stats: getOverviewStats({
+      instructorId: currentUserId,
+      since: dateRange.since,
+    }),
     courses: getCourseStats({ instructorId: currentUserId }),
   };
 }
@@ -92,7 +105,7 @@ export function HydrateFallback() {
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
-  const { stats, courses } = loaderData;
+  const { stats, courses, dateRange } = loaderData;
 
   // Courses arrive ranked by revenue, so the head of the list IS the ranking.
   const topCourses = courses
@@ -110,11 +123,14 @@ export default function InstructorAnalytics({
         <span className="text-foreground">Analytics</span>
       </nav>
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold">Analytics</h1>
-        <p className="mt-1 text-muted-foreground">
-          Performance across all your courses
-        </p>
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Analytics</h1>
+          <p className="mt-1 text-muted-foreground">
+            Performance across all your courses
+          </p>
+        </div>
+        {stats.courseCount > 0 && <RangeSelector value={dateRange.range} />}
       </div>
 
       {stats.courseCount === 0 ? (
@@ -145,7 +161,7 @@ export default function InstructorAnalytics({
               <CardContent>
                 <div className="text-3xl font-bold">{stats.totalEnrollments}</div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  All time, across {stats.courseCount}{" "}
+                  {dateRange.label}, across {stats.courseCount}{" "}
                   {stats.courseCount === 1 ? "course" : "courses"}
                 </p>
               </CardContent>
@@ -162,7 +178,7 @@ export default function InstructorAnalytics({
                   {formatPrice(stats.grossEarningsCents)}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  All time, before any fees
+                  {dateRange.label}, before any fees
                 </p>
               </CardContent>
             </Card>
@@ -180,7 +196,8 @@ export default function InstructorAnalytics({
                     : formatPrice(stats.avgRevenuePerStudentCents)}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Blended: earnings ÷ all enrollments
+                  Blended: earnings ÷ all enrollments,{" "}
+                  {dateRange.label.toLowerCase()}
                 </p>
               </CardContent>
             </Card>
@@ -189,7 +206,12 @@ export default function InstructorAnalytics({
           {/* Top courses by revenue */}
           <Card className="mt-8">
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-base">Top Courses by Revenue</CardTitle>
+              <CardTitle className="text-base">
+                Top Courses by Revenue{" "}
+                <span className="font-normal text-muted-foreground">
+                  · all time
+                </span>
+              </CardTitle>
               <Trophy className="size-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -223,7 +245,12 @@ export default function InstructorAnalytics({
           {/* Course comparison table */}
           <Card className="mt-8">
             <CardHeader>
-              <CardTitle className="text-base">Course Comparison</CardTitle>
+              <CardTitle className="text-base">
+                Course Comparison{" "}
+                <span className="font-normal text-muted-foreground">
+                  · all time
+                </span>
+              </CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0">
               <table className="w-full">

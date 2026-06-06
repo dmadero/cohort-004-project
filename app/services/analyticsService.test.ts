@@ -41,17 +41,28 @@ function createCourse(opts: {
     .get();
 }
 
-function enroll(opts: { userId: number; courseId: number; completedAt?: string }) {
+function enroll(opts: {
+  userId: number;
+  courseId: number;
+  enrolledAt?: string;
+  completedAt?: string;
+}) {
   return testDb.insert(schema.enrollments).values(opts).returning().get();
 }
 
-function purchase(opts: { userId: number; courseId: number; pricePaidCents: number }) {
+function purchase(opts: {
+  userId: number;
+  courseId: number;
+  pricePaidCents: number;
+  createdAt?: string;
+}) {
   return testDb
     .insert(schema.purchases)
     .values({
       userId: opts.userId,
       courseId: opts.courseId,
       pricePaid: opts.pricePaidCents,
+      createdAt: opts.createdAt,
     })
     .returning()
     .get();
@@ -75,7 +86,7 @@ describe("analyticsService", () => {
       enroll({ userId: studentB.id, courseId: base.course.id });
       enroll({ userId: studentC.id, courseId: second.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id });
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
 
       expect(stats).toMatchObject({ courseCount: 2, totalEnrollments: 3 });
     });
@@ -88,7 +99,7 @@ describe("analyticsService", () => {
       });
       enroll({ userId: base.user.id, courseId: base.course.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id });
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
 
       expect(stats).toMatchObject({ courseCount: 2, totalEnrollments: 1 });
     });
@@ -114,7 +125,7 @@ describe("analyticsService", () => {
         pricePaidCents: 9900,
       });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id });
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
 
       expect(stats).toEqual({
         courseCount: 1,
@@ -135,7 +146,7 @@ describe("analyticsService", () => {
         .returning()
         .get();
 
-      const stats = getOverviewStats({ instructorId: newInstructor.id });
+      const stats = getOverviewStats({ instructorId: newInstructor.id, since: null });
 
       expect(stats).toEqual({
         courseCount: 0,
@@ -160,7 +171,7 @@ describe("analyticsService", () => {
       });
       purchase({ userId: studentB.id, courseId: second.id, pricePaidCents: 9900 });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id });
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
 
       expect(stats).toMatchObject({
         grossEarningsCents: 14800,
@@ -179,7 +190,7 @@ describe("analyticsService", () => {
       enroll({ userId: seatA.id, courseId: base.course.id });
       enroll({ userId: seatB.id, courseId: base.course.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id });
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
 
       expect(stats).toMatchObject({
         totalEnrollments: 3,
@@ -191,12 +202,94 @@ describe("analyticsService", () => {
     it("reports zero average revenue per student when all enrollments are free", () => {
       enroll({ userId: base.user.id, courseId: base.course.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id });
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
 
       expect(stats).toMatchObject({
         totalEnrollments: 1,
         grossEarningsCents: 0,
         avgRevenuePerStudentCents: 0,
+      });
+    });
+
+    it("excludes enrollments and purchases dated before the range start", () => {
+      const studentB = createStudent("b@example.com");
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-01-15T00:00:00.000Z", // before the window
+      });
+      enroll({
+        userId: studentB.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-05-20T00:00:00.000Z", // inside the window
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+        createdAt: "2026-01-15T00:00:00.000Z", // before the window
+      });
+      purchase({
+        userId: studentB.id,
+        courseId: base.course.id,
+        pricePaidCents: 9900,
+        createdAt: "2026-05-20T00:00:00.000Z", // inside the window
+      });
+
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: "2026-05-01T00:00:00.000Z",
+      });
+
+      expect(stats).toEqual({
+        courseCount: 1,
+        totalEnrollments: 1,
+        grossEarningsCents: 9900,
+        avgRevenuePerStudentCents: 9900,
+      });
+    });
+
+    it("includes activity dated exactly at the range start", () => {
+      const since = "2026-05-01T00:00:00.000Z";
+      enroll({ userId: base.user.id, courseId: base.course.id, enrolledAt: since });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+        createdAt: since,
+      });
+
+      const stats = getOverviewStats({ instructorId: base.instructor.id, since });
+
+      expect(stats).toMatchObject({
+        totalEnrollments: 1,
+        grossEarningsCents: 4900,
+      });
+    });
+
+    it("returns zeros and a null average for a window with no activity, keeping the all-time course count", () => {
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-01-15T00:00:00.000Z",
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+        createdAt: "2026-01-15T00:00:00.000Z",
+      });
+
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: "2026-06-01T00:00:00.000Z",
+      });
+
+      expect(stats).toEqual({
+        courseCount: 1,
+        totalEnrollments: 0,
+        grossEarningsCents: 0,
+        avgRevenuePerStudentCents: null,
       });
     });
   });

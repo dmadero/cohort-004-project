@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { courses, enrollments, purchases } from "~/db/schema";
 
@@ -8,11 +8,18 @@ import { courses, enrollments, purchases } from "~/db/schema";
 // by the PRD (docs/prd-analytics-feature.md); record changes there first.
 
 export interface OverviewStats {
-  /** Courses the instructor owns, regardless of status (draft/archived included). */
+  /**
+   * Courses the instructor owns, regardless of status (draft/archived
+   * included). Always all-time — a course doesn't stop existing when the
+   * period narrows; only its period activity goes to zero.
+   */
   courseCount: number;
-  /** All-time enrollments across every owned course. */
+  /** Enrollments within the requested period across every owned course. */
   totalEnrollments: number;
-  /** All-time gross earnings in cents: SUM(purchases.pricePaid) over owned courses. */
+  /**
+   * Gross earnings in cents within the requested period:
+   * SUM(purchases.pricePaid) over owned courses, dated by purchase date.
+   */
   grossEarningsCents: number;
   /**
    * Blended average revenue per student in cents — gross earnings ÷ ALL
@@ -39,24 +46,57 @@ export interface CourseStats {
 }
 
 /**
- * Cross-course overview KPIs for one instructor, derived from the same
- * per-course aggregates the comparison table shows so the two sections can
- * never disagree. An instructor with no courses gets zeros, not an error.
+ * Cross-course overview KPIs for one instructor, scoped to the resolved date
+ * range (PRD: period KPIs follow the range; the comparison table from
+ * `getCourseStats` stays all-time). An instructor with no courses — or no
+ * activity in the window — gets zeros, not an error.
  */
-export function getOverviewStats(opts: { instructorId: number }): OverviewStats {
-  const courseStats = getCourseStats(opts);
+export function getOverviewStats(opts: {
+  instructorId: number;
+  /** Inclusive ISO-UTC lower bound for the period KPIs; null = all-time. */
+  since: string | null;
+}): OverviewStats {
+  // The period filter applies inside the grouped subqueries; the outer query
+  // over courses keeps courseCount all-time even when the window is empty.
+  const enrollmentStats = db
+    .select({
+      courseId: enrollments.courseId,
+      enrollmentCount: sql<number>`count(*)`.as("enrollment_count"),
+    })
+    .from(enrollments)
+    .where(opts.since ? gte(enrollments.enrolledAt, opts.since) : undefined)
+    .groupBy(enrollments.courseId)
+    .as("enrollment_stats");
 
-  const totalEnrollments = courseStats.reduce(
-    (sum, course) => sum + course.enrollmentCount,
-    0
-  );
-  const grossEarningsCents = courseStats.reduce(
-    (sum, course) => sum + course.grossEarningsCents,
-    0
-  );
+  const purchaseStats = db
+    .select({
+      courseId: purchases.courseId,
+      grossEarningsCents: sql<number>`sum(${purchases.pricePaid})`.as(
+        "gross_earnings_cents"
+      ),
+    })
+    .from(purchases)
+    .where(opts.since ? gte(purchases.createdAt, opts.since) : undefined)
+    .groupBy(purchases.courseId)
+    .as("purchase_stats");
+
+  const totals = db
+    .select({
+      courseCount: sql<number>`count(*)`,
+      totalEnrollments: sql<number>`coalesce(sum(${enrollmentStats.enrollmentCount}), 0)`,
+      grossEarningsCents: sql<number>`coalesce(sum(${purchaseStats.grossEarningsCents}), 0)`,
+    })
+    .from(courses)
+    .leftJoin(enrollmentStats, eq(enrollmentStats.courseId, courses.id))
+    .leftJoin(purchaseStats, eq(purchaseStats.courseId, courses.id))
+    .where(eq(courses.instructorId, opts.instructorId))
+    .get();
+
+  // An aggregate without GROUP BY always yields exactly one row.
+  const { courseCount, totalEnrollments, grossEarningsCents } = totals!;
 
   return {
-    courseCount: courseStats.length,
+    courseCount,
     totalEnrollments,
     grossEarningsCents,
     avgRevenuePerStudentCents:
