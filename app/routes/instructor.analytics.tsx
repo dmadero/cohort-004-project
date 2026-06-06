@@ -1,12 +1,22 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/instructor.analytics";
-import { getOverviewStats } from "~/services/analyticsService";
+import { getCourseStats, getOverviewStats } from "~/services/analyticsService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, ChartColumn, Plus, Users } from "lucide-react";
+import { CourseStatusBadge } from "~/components/course-status-badge";
+import { formatPrice } from "~/lib/utils";
+import {
+  AlertTriangle,
+  ChartColumn,
+  DollarSign,
+  Plus,
+  TrendingUp,
+  Trophy,
+  Users,
+} from "lucide-react";
 import { data, isRouteErrorResponse } from "react-router";
 import { UserRole } from "~/db/schema";
 
@@ -34,7 +44,15 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  return { stats: getOverviewStats({ instructorId: currentUserId }) };
+  return {
+    stats: getOverviewStats({ instructorId: currentUserId }),
+    courses: getCourseStats({ instructorId: currentUserId }),
+  };
+}
+
+function formatCompletionRate(rate: number | null) {
+  if (rate === null) return "—";
+  return `${Math.round(rate * 100)}%`;
 }
 
 export function HydrateFallback() {
@@ -45,16 +63,28 @@ export function HydrateFallback() {
         <Skeleton className="mt-2 h-5 w-72" />
       </div>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-4 w-32" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-9 w-20" />
-            <Skeleton className="mt-2 h-4 w-24" />
-          </CardContent>
-        </Card>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-4 w-32" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-9 w-20" />
+              <Skeleton className="mt-2 h-4 w-24" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
+      <Card className="mt-8">
+        <CardHeader>
+          <Skeleton className="h-5 w-44" />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -62,7 +92,12 @@ export function HydrateFallback() {
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
-  const { stats } = loaderData;
+  const { stats, courses } = loaderData;
+
+  // Courses arrive ranked by revenue, so the head of the list IS the ranking.
+  const topCourses = courses
+    .filter((course) => course.grossEarningsCents > 0)
+    .slice(0, 5);
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -97,23 +132,148 @@ export default function InstructorAnalytics({
           </Link>
         </div>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <Card>
+        <>
+          {/* KPI cards */}
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Enrollments
+                </CardTitle>
+                <Users className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{stats.totalEnrollments}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  All time, across {stats.courseCount}{" "}
+                  {stats.courseCount === 1 ? "course" : "courses"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Gross Earnings
+                </CardTitle>
+                <DollarSign className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {formatPrice(stats.grossEarningsCents)}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  All time, before any fees
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Avg. Revenue / Student
+                </CardTitle>
+                <TrendingUp className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {stats.avgRevenuePerStudentCents === null
+                    ? "—"
+                    : formatPrice(stats.avgRevenuePerStudentCents)}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Blended: earnings ÷ all enrollments
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Top courses by revenue */}
+          <Card className="mt-8">
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Enrollments
-              </CardTitle>
-              <Users className="size-4 text-muted-foreground" />
+              <CardTitle className="text-base">Top Courses by Revenue</CardTitle>
+              <Trophy className="size-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{stats.totalEnrollments}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                All time, across {stats.courseCount}{" "}
-                {stats.courseCount === 1 ? "course" : "courses"}
-              </p>
+              {topCourses.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  No revenue yet — sales will rank your courses here.
+                </p>
+              ) : (
+                <ol className="divide-y divide-border">
+                  {topCourses.map((course, i) => (
+                    <li
+                      key={course.courseId}
+                      className="flex items-center gap-4 py-3"
+                    >
+                      <span className="w-6 text-center text-sm font-semibold text-muted-foreground">
+                        {i + 1}
+                      </span>
+                      <span className="flex-1 truncate text-sm font-medium">
+                        {course.title}
+                      </span>
+                      <span className="text-sm font-semibold">
+                        {formatPrice(course.grossEarningsCents)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </CardContent>
           </Card>
-        </div>
+
+          {/* Course comparison table */}
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle className="text-base">Course Comparison</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto p-0">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Course
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Enrollments
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Earnings
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Completion
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {courses.map((course) => (
+                    <tr
+                      key={course.courseId}
+                      className="border-b border-border last:border-0"
+                    >
+                      <td className="px-4 py-3">
+                        <p className="text-sm font-medium">{course.title}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <CourseStatusBadge status={course.status} />
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                        {course.enrollmentCount}
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                        {formatPrice(course.grossEarningsCents)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                        {formatCompletionRate(course.completionRate)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
