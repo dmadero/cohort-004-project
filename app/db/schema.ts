@@ -5,6 +5,7 @@ import {
   real,
   unique,
   check,
+  index,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -111,31 +112,41 @@ export const lessons = sqliteTable("lessons", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
-export const enrollments = sqliteTable("enrollments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  courseId: integer("course_id")
-    .notNull()
-    .references(() => courses.id),
-  enrolledAt: text("enrolled_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-  completedAt: text("completed_at"),
-});
+export const enrollments = sqliteTable(
+  "enrollments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    courseId: integer("course_id")
+      .notNull()
+      .references(() => courses.id),
+    enrolledAt: text("enrolled_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    completedAt: text("completed_at"),
+  },
+  // Analytics hot path: per-course enrollment counts and date-bucketed trends.
+  (t) => [index("enrollments_course_id_enrolled_at_idx").on(t.courseId, t.enrolledAt)]
+);
 
-export const lessonProgress = sqliteTable("lesson_progress", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  lessonId: integer("lesson_id")
-    .notNull()
-    .references(() => lessons.id),
-  status: text("status").notNull().$type<LessonProgressStatus>(),
-  completedAt: text("completed_at"),
-});
+export const lessonProgress = sqliteTable(
+  "lesson_progress",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    lessonId: integer("lesson_id")
+      .notNull()
+      .references(() => lessons.id),
+    status: text("status").notNull().$type<LessonProgressStatus>(),
+    completedAt: text("completed_at"),
+  },
+  // Analytics hot path: started/completed counts in the lesson drop-off funnel.
+  (t) => [index("lesson_progress_lesson_id_status_idx").on(t.lessonId, t.status)]
+);
 
 export const courseReviews = sqliteTable(
   "course_reviews",
@@ -187,20 +198,31 @@ export const quizOptions = sqliteTable("quiz_options", {
   isCorrect: integer("is_correct", { mode: "boolean" }).notNull(),
 });
 
-export const quizAttempts = sqliteTable("quiz_attempts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  quizId: integer("quiz_id")
-    .notNull()
-    .references(() => quizzes.id),
-  score: real("score").notNull(),
-  passed: integer("passed", { mode: "boolean" }).notNull(),
-  attemptedAt: text("attempted_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-});
+export const quizAttempts = sqliteTable(
+  "quiz_attempts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    quizId: integer("quiz_id")
+      .notNull()
+      .references(() => quizzes.id),
+    score: real("score").notNull(),
+    passed: integer("passed", { mode: "boolean" }).notNull(),
+    attemptedAt: text("attempted_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  // Analytics hot path: first-attempt-per-student quiz metrics.
+  (t) => [
+    index("quiz_attempts_quiz_id_user_id_attempted_at_idx").on(
+      t.quizId,
+      t.userId,
+      t.attemptedAt
+    ),
+  ]
+);
 
 export const quizAnswers = sqliteTable("quiz_answers", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -215,20 +237,25 @@ export const quizAnswers = sqliteTable("quiz_answers", {
     .references(() => quizOptions.id),
 });
 
-export const purchases = sqliteTable("purchases", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  courseId: integer("course_id")
-    .notNull()
-    .references(() => courses.id),
-  pricePaid: integer("price_paid").notNull(),
-  country: text("country"),
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-});
+export const purchases = sqliteTable(
+  "purchases",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    courseId: integer("course_id")
+      .notNull()
+      .references(() => courses.id),
+    pricePaid: integer("price_paid").notNull(),
+    country: text("country"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  // Analytics hot path: per-course earnings and date-bucketed revenue trends.
+  (t) => [index("purchases_course_id_created_at_idx").on(t.courseId, t.createdAt)]
+);
 
 export const teams = sqliteTable("teams", {
   id: integer("id").primaryKey({ autoIncrement: true }),
