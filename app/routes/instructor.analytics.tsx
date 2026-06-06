@@ -1,8 +1,14 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/instructor.analytics";
-import { getCourseStats, getOverviewStats } from "~/services/analyticsService";
+import {
+  getCourseStats,
+  getEnrollmentTrend,
+  getOverviewStats,
+  getRevenueTrend,
+} from "~/services/analyticsService";
 import { resolveDateRange } from "~/lib/date-range";
 import { RangeSelector } from "~/components/range-selector";
+import { TrendChart } from "~/components/trend-chart";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -48,10 +54,17 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Period KPIs follow the URL range; the comparison table and top-courses
   // ranking are structural and stay all-time (PRD time-filtering rules).
+  const now = new Date();
   const dateRange = resolveDateRange({
     range: new URL(request.url).searchParams.get("range"),
-    now: new Date(),
+    now,
   });
+  const trendOptions = {
+    instructorId: currentUserId,
+    since: dateRange.since,
+    until: now.toISOString(),
+    granularity: dateRange.granularity,
+  };
 
   return {
     dateRange,
@@ -60,12 +73,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       since: dateRange.since,
     }),
     courses: getCourseStats({ instructorId: currentUserId }),
+    enrollmentTrend: getEnrollmentTrend(trendOptions),
+    revenueTrend: getRevenueTrend(trendOptions),
   };
 }
 
 function formatCompletionRate(rate: number | null) {
   if (rate === null) return "—";
   return `${Math.round(rate * 100)}%`;
+}
+
+/** Unlike formatPrice, zero renders "$0.00" — a bucket with no sales isn't "Free". */
+function formatEarnings(cents: number) {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
 export function HydrateFallback() {
@@ -88,6 +108,18 @@ export function HydrateFallback() {
           </Card>
         ))}
       </div>
+      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-5 w-40" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-64 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
       <Card className="mt-8">
         <CardHeader>
           <Skeleton className="h-5 w-44" />
@@ -105,7 +137,8 @@ export function HydrateFallback() {
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
-  const { stats, courses, dateRange } = loaderData;
+  const { stats, courses, dateRange, enrollmentTrend, revenueTrend } =
+    loaderData;
 
   // Courses arrive ranked by revenue, so the head of the list IS the ranking.
   const topCourses = courses
@@ -199,6 +232,45 @@ export default function InstructorAnalytics({
                   Blended: earnings ÷ all enrollments,{" "}
                   {dateRange.label.toLowerCase()}
                 </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Trend charts — buckets follow the range's granularity */}
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Enrollment Trend{" "}
+                  <span className="font-normal text-muted-foreground">
+                    · {dateRange.label.toLowerCase()}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TrendChart
+                  points={enrollmentTrend}
+                  granularity={dateRange.granularity}
+                  label="Enrollments"
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Revenue Trend{" "}
+                  <span className="font-normal text-muted-foreground">
+                    · {dateRange.label.toLowerCase()}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TrendChart
+                  points={revenueTrend}
+                  granularity={dateRange.granularity}
+                  label="Revenue"
+                  formatValue={formatEarnings}
+                />
               </CardContent>
             </Card>
           </div>
