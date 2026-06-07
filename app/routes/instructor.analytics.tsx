@@ -352,7 +352,12 @@ export default function InstructorAnalytics({
                       className="border-b border-border last:border-0"
                     >
                       <td className="px-4 py-3">
-                        <p className="text-sm font-medium">{course.title}</p>
+                        <Link
+                          to={`/instructor/${course.courseId}/analytics`}
+                          className="text-sm font-medium hover:underline"
+                        >
+                          {course.title}
+                        </Link>
                       </td>
                       <td className="px-4 py-3">
                         <CourseStatusBadge status={course.status} />

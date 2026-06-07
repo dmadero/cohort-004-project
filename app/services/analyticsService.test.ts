@@ -13,6 +13,8 @@ vi.mock("~/db", () => ({
 
 // Import after mock so the module picks up our test db
 import {
+  getCompletionTrend,
+  getCourseFunnel,
   getCourseStats,
   getEnrollmentTrend,
   getOverviewStats,
@@ -68,6 +70,32 @@ function purchase(opts: {
       courseId: opts.courseId,
       pricePaid: opts.pricePaidCents,
       createdAt: opts.createdAt,
+    })
+    .returning()
+    .get();
+}
+
+/** Creates a module + lesson in the course; returns the lesson. */
+function createLessonInCourse(opts: { courseId: number }) {
+  const module = testDb
+    .insert(schema.modules)
+    .values({ courseId: opts.courseId, title: "Module", position: 1 })
+    .returning()
+    .get();
+  return testDb
+    .insert(schema.lessons)
+    .values({ moduleId: module.id, title: "Lesson", position: 1 })
+    .returning()
+    .get();
+}
+
+function recordProgress(opts: { userId: number; lessonId: number }) {
+  return testDb
+    .insert(schema.lessonProgress)
+    .values({
+      userId: opts.userId,
+      lessonId: opts.lessonId,
+      status: schema.LessonProgressStatus.InProgress,
     })
     .returning()
     .get();
@@ -706,6 +734,205 @@ describe("analyticsService", () => {
     it("returns an empty series for a window with no purchases", () => {
       const series = getRevenueTrend({
         instructorId: base.instructor.id,
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-05T00:00:00.000Z",
+        granularity: "daily",
+      });
+
+      expect(series).toEqual([]);
+    });
+  });
+
+  describe("getCourseFunnel", () => {
+    it("counts enrolled, started, and completed including enrolled-but-never-started students", () => {
+      const lesson = createLessonInCourse({ courseId: base.course.id });
+      const studentB = createStudent("b@example.com");
+      const studentC = createStudent("c@example.com");
+      // base.user completed; studentB started but unfinished; studentC never started.
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        completedAt: "2026-06-01T00:00:00.000Z",
+      });
+      recordProgress({ userId: base.user.id, lessonId: lesson.id });
+      enroll({ userId: studentB.id, courseId: base.course.id });
+      recordProgress({ userId: studentB.id, lessonId: lesson.id });
+      enroll({ userId: studentC.id, courseId: base.course.id });
+
+      const funnel = getCourseFunnel({ courseId: base.course.id });
+
+      expect(funnel).toEqual({
+        enrolledCount: 3,
+        startedCount: 2,
+        completedCount: 1,
+      });
+    });
+
+    it("counts a student with progress on several lessons as started once", () => {
+      const module = testDb
+        .insert(schema.modules)
+        .values({ courseId: base.course.id, title: "Module", position: 1 })
+        .returning()
+        .get();
+      const [lessonA, lessonB] = [1, 2].map((position) =>
+        testDb
+          .insert(schema.lessons)
+          .values({ moduleId: module.id, title: `Lesson ${position}`, position })
+          .returning()
+          .get()
+      );
+      enroll({ userId: base.user.id, courseId: base.course.id });
+      recordProgress({ userId: base.user.id, lessonId: lessonA.id });
+      recordProgress({ userId: base.user.id, lessonId: lessonB.id });
+
+      const funnel = getCourseFunnel({ courseId: base.course.id });
+
+      expect(funnel).toEqual({
+        enrolledCount: 1,
+        startedCount: 1,
+        completedCount: 0,
+      });
+    });
+
+    it("ignores progress on another course's lessons", () => {
+      const other = createCourse({
+        instructorId: base.instructor.id,
+        slug: "other-course",
+      });
+      const otherLesson = createLessonInCourse({ courseId: other.id });
+      enroll({ userId: base.user.id, courseId: base.course.id });
+      recordProgress({ userId: base.user.id, lessonId: otherLesson.id });
+
+      const funnel = getCourseFunnel({ courseId: base.course.id });
+
+      expect(funnel).toEqual({
+        enrolledCount: 1,
+        startedCount: 0,
+        completedCount: 0,
+      });
+    });
+
+    it("ignores lesson progress from users not enrolled in the course", () => {
+      const lesson = createLessonInCourse({ courseId: base.course.id });
+      const browser = createStudent("browser@example.com");
+      enroll({ userId: base.user.id, courseId: base.course.id });
+      // Progress without an enrollment (e.g. enrollment later removed).
+      recordProgress({ userId: browser.id, lessonId: lesson.id });
+
+      const funnel = getCourseFunnel({ courseId: base.course.id });
+
+      expect(funnel).toEqual({
+        enrolledCount: 1,
+        startedCount: 0,
+        completedCount: 0,
+      });
+    });
+
+    it("returns zeros for a course with no enrollments", () => {
+      const funnel = getCourseFunnel({ courseId: base.course.id });
+
+      expect(funnel).toEqual({
+        enrolledCount: 0,
+        startedCount: 0,
+        completedCount: 0,
+      });
+    });
+  });
+
+  describe("getCompletionTrend", () => {
+    it("buckets completions per day with zero-filled gaps through the window end", () => {
+      const studentB = createStudent("b@example.com");
+      const studentC = createStudent("c@example.com");
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        completedAt: "2026-06-01T08:00:00.000Z",
+      });
+      enroll({
+        userId: studentB.id,
+        courseId: base.course.id,
+        completedAt: "2026-06-01T20:00:00.000Z",
+      });
+      enroll({
+        userId: studentC.id,
+        courseId: base.course.id,
+        completedAt: "2026-06-03T12:00:00.000Z",
+      });
+
+      const series = getCompletionTrend({
+        courseId: base.course.id,
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-04T12:00:00.000Z",
+        granularity: "daily",
+      });
+
+      expect(series).toEqual([
+        { bucket: "2026-06-01", value: 2 },
+        { bucket: "2026-06-02", value: 0 },
+        { bucket: "2026-06-03", value: 1 },
+        { bucket: "2026-06-04", value: 0 },
+      ]);
+    });
+
+    it("filters by completion date, ignoring unfinished and pre-window completions", () => {
+      const studentB = createStudent("b@example.com");
+      const studentC = createStudent("c@example.com");
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-06-02T00:00:00.000Z", // enrolled inside, never completed
+      });
+      enroll({
+        userId: studentB.id,
+        courseId: base.course.id,
+        completedAt: "2026-05-20T00:00:00.000Z", // completed before the window
+      });
+      enroll({
+        userId: studentC.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-05-01T00:00:00.000Z", // enrolled before, completed inside
+        completedAt: "2026-06-02T00:00:00.000Z",
+      });
+
+      const series = getCompletionTrend({
+        courseId: base.course.id,
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-02T00:00:00.000Z",
+        granularity: "daily",
+      });
+
+      expect(series).toEqual([
+        { bucket: "2026-06-01", value: 0 },
+        { bucket: "2026-06-02", value: 1 },
+      ]);
+    });
+
+    it("excludes completions on other courses", () => {
+      const other = createCourse({
+        instructorId: base.instructor.id,
+        slug: "other-course",
+      });
+      enroll({
+        userId: base.user.id,
+        courseId: other.id,
+        completedAt: "2026-06-02T00:00:00.000Z",
+      });
+
+      const series = getCompletionTrend({
+        courseId: base.course.id,
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-05T00:00:00.000Z",
+        granularity: "daily",
+      });
+
+      expect(series).toEqual([]);
+    });
+
+    it("returns an empty series for a window with no completions", () => {
+      enroll({ userId: base.user.id, courseId: base.course.id });
+
+      const series = getCompletionTrend({
+        courseId: base.course.id,
         since: "2026-06-01T00:00:00.000Z",
         until: "2026-06-05T00:00:00.000Z",
         granularity: "daily",

@@ -1,6 +1,23 @@
-import { and, asc, desc, eq, gte, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  sql,
+  type AnyColumn,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "~/db";
-import { courses, enrollments, purchases } from "~/db/schema";
+import {
+  courses,
+  enrollments,
+  lessonProgress,
+  lessons,
+  modules,
+  purchases,
+} from "~/db/schema";
 import type { RangeGranularity } from "~/lib/date-range";
 
 // ─── Analytics Service ───
@@ -178,8 +195,7 @@ export interface TrendPoint {
   value: number;
 }
 
-export interface TrendOptions {
-  instructorId: number;
+interface TrendWindow {
   /** Inclusive ISO-UTC lower bound, or null for all-time. */
   since: string | null;
   /**
@@ -188,6 +204,16 @@ export interface TrendOptions {
    */
   until: string;
   granularity: RangeGranularity;
+}
+
+/** Window for instructor-wide trends, spanning every course they own. */
+export interface TrendOptions extends TrendWindow {
+  instructorId: number;
+}
+
+/** Window for single-course trends on the drill-down view. */
+export interface CourseTrendOptions extends TrendWindow {
+  courseId: number;
 }
 
 /**
@@ -296,6 +322,35 @@ export function getEnrollmentTrend(opts: TrendOptions): TrendPoint[] {
 }
 
 /**
+ * Course completions per time bucket for one course, gapless within the
+ * window. `value` = enrollments whose `completedAt` falls in the bucket, so
+ * the range filters by completion date, not enrollment date. Empty window →
+ * empty series.
+ */
+export function getCompletionTrend(opts: CourseTrendOptions): TrendPoint[] {
+  const bucket = bucketExpr({
+    column: enrollments.completedAt,
+    granularity: opts.granularity,
+  });
+
+  const rows = db
+    .select({ bucket, value: sql<number>`count(*)` })
+    .from(enrollments)
+    .where(
+      and(
+        eq(enrollments.courseId, opts.courseId),
+        isNotNull(enrollments.completedAt),
+        opts.since ? gte(enrollments.completedAt, opts.since) : undefined
+      )
+    )
+    .groupBy(bucket)
+    .orderBy(bucket)
+    .all();
+
+  return zeroFill({ rows, ...opts });
+}
+
+/**
  * Gross earnings per time bucket across every course the instructor owns,
  * gapless within the window. `value` = SUM(purchases.pricePaid) in cents,
  * dated by purchase date. Empty window → empty series.
@@ -321,4 +376,51 @@ export function getRevenueTrend(opts: TrendOptions): TrendPoint[] {
     .all();
 
   return zeroFill({ rows, ...opts });
+}
+
+// ─── Course drill-down funnel ───
+
+export interface CourseFunnel {
+  /** All-time enrollments on the course. */
+  enrolledCount: number;
+  /**
+   * Enrolled students with ≥1 lessonProgress row on this course's lessons
+   * (the PRD's "started" definition). Progress rows only exist once a student
+   * opens or completes a lesson, so row existence alone means activity.
+   */
+  startedCount: number;
+  /** Enrollments with `completedAt` set — same definition as completion rate. */
+  completedCount: number;
+}
+
+/**
+ * Enrolled → started → completed funnel for one course. All-time: the PRD
+ * classes the funnel as structural, exempt from range filtering. One
+ * aggregate query — the started-users subquery is distinct per user, so its
+ * left join matches at most one row per enrollment and cannot fan out the
+ * counts. A course with no enrollments yields zeros, not an error.
+ */
+export function getCourseFunnel(opts: { courseId: number }): CourseFunnel {
+  const startedUsers = db
+    .selectDistinct({ userId: lessonProgress.userId })
+    .from(lessonProgress)
+    .innerJoin(lessons, eq(lessons.id, lessonProgress.lessonId))
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .where(eq(modules.courseId, opts.courseId))
+    .as("started_users");
+
+  const funnel = db
+    .select({
+      enrolledCount: sql<number>`count(*)`,
+      // count(col) skips NULLs: unmatched joins and never-completed rows.
+      startedCount: sql<number>`count(${startedUsers.userId})`,
+      completedCount: sql<number>`count(${enrollments.completedAt})`,
+    })
+    .from(enrollments)
+    .leftJoin(startedUsers, eq(startedUsers.userId, enrollments.userId))
+    .where(eq(enrollments.courseId, opts.courseId))
+    .get();
+
+  // An aggregate without GROUP BY always yields exactly one row.
+  return funnel!;
 }
