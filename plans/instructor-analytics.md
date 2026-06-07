@@ -168,6 +168,6 @@ A responsive pass across both views (KPI cards stack, tables scroll or collapse,
 
 ### Acceptance criteria
 
-- [ ] Both routes are usable on small screens (no horizontal overflow, charts resize)
-- [ ] `docs/analytics.md` documents every metric definition, the flag constants, range/granularity rules, and the pre-aggregation scale-up path
-- [ ] Full test suite and typecheck pass
+- [x] Both routes are usable on small screens (no horizontal overflow, charts resize)
+- [x] `docs/analytics.md` documents every metric definition, the flag constants, range/granularity rules, and the pre-aggregation scale-up path
+- [x] Full test suite and typecheck pass

@@ -41,6 +41,9 @@ export function ScoreHistogram({ distribution }: ScoreHistogramProps) {
 
   const data = distribution.map((count, index) => ({
     bucket: bucketLabel(index),
+    // Axis shows just the bin's lower edge ("0", "10", … "90") so all ten
+    // labels stay legible on a phone; the tooltip carries the full range.
+    tick: `${index * 10}`,
     count,
   }));
 
@@ -49,12 +52,12 @@ export function ScoreHistogram({ distribution }: ScoreHistogramProps) {
       <BarChart data={data} margin={{ left: 4, right: 4 }}>
         <CartesianGrid vertical={false} />
         <XAxis
-          dataKey="bucket"
+          dataKey="tick"
           tickLine={false}
           axisLine={false}
           tickMargin={8}
           interval={0}
-          tickFormatter={(bucket: string) => bucket.replace("%", "")}
+          unit="%"
         />
         <YAxis
           width={32}
