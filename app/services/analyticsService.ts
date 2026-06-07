@@ -18,6 +18,8 @@ import {
   lessons,
   modules,
   purchases,
+  quizAttempts,
+  quizzes,
 } from "~/db/schema";
 import type { RangeGranularity } from "~/lib/date-range";
 
@@ -548,4 +550,311 @@ function annotateLessonFunnel(
         priorCompleted >= MIN_PRIOR_COMPLETIONS_FOR_INSIGHT,
     };
   });
+}
+
+// ─── Quiz performance ───
+
+/**
+ * High-failure flag thresholds (PRD: constants live in the service). A quiz is
+ * flagged when at least half its first-attempt takers failed AND enough
+ * students attempted for that rate to be signal rather than noise. Both bounds
+ * are inclusive, so a quiz exactly on either edge still qualifies.
+ */
+const HIGH_FAILURE_RATE_THRESHOLD = 0.5;
+const MIN_ATTEMPTS_FOR_FAILURE_FLAG = 5;
+
+/** Score distribution buckets: ten deciles spanning [0, 1]. */
+const DISTRIBUTION_BUCKET_COUNT = 10;
+
+export interface QuizScoreStats {
+  quizId: number;
+  quizTitle: string;
+  lessonId: number;
+  lessonTitle: string;
+  /** Distinct students with a first attempt on this quiz; 0 when none. */
+  studentCount: number;
+  /**
+   * Mean first-attempt score (0–1) across those students. Null when nobody has
+   * attempted — "no data" is not a zero average.
+   */
+  avgScore: number | null;
+  /**
+   * Fraction (0–1) of first attempts that did not pass. Null when nobody has
+   * attempted.
+   */
+  failRate: number | null;
+  /**
+   * PRD high-failure flag: failRate ≥ 0.5 AND studentCount ≥ 5. Quizzes below
+   * the sample-size floor are never flagged, however badly they read.
+   */
+  isHighFailure: boolean;
+  /**
+   * First-attempt score counts across ten deciles: index i covers scores in
+   * [i/10, (i+1)/10), with a perfect 1.0 folded into the last bucket. Always
+   * length 10, even with no attempts (all zeros).
+   */
+  distribution: number[];
+}
+
+export interface LessonQuizStats {
+  lessonId: number;
+  lessonTitle: string;
+  /** Attempt-weighted mean first-attempt score across the lesson's quizzes. */
+  avgScore: number | null;
+  /** Total distinct first attempts across the lesson's quizzes. */
+  studentCount: number;
+  quizzes: QuizScoreStats[];
+}
+
+export interface ModuleQuizStats {
+  moduleId: number;
+  moduleTitle: string;
+  /** Attempt-weighted mean first-attempt score across the module's quizzes. */
+  avgScore: number | null;
+  /** Total distinct first attempts across the module's quizzes. */
+  studentCount: number;
+  lessons: LessonQuizStats[];
+}
+
+export interface CourseQuizPerformance {
+  /** Quizzes attached to the course's lessons; 0 → render an empty state. */
+  quizCount: number;
+  /** Attempt-weighted mean first-attempt score across every quiz; null when none. */
+  avgScore: number | null;
+  /** Total distinct first attempts across the course's quizzes. */
+  attemptCount: number;
+  /** Course-wide first-attempt score distribution, same decile scheme as a quiz. */
+  distribution: number[];
+  /** Quizzes meeting the high-failure thresholds, in course order. */
+  flaggedQuizzes: QuizScoreStats[];
+  /** Course structure with averages at every altitude (module → lesson → quiz). */
+  modules: ModuleQuizStats[];
+}
+
+interface FirstAttempt {
+  quizId: number;
+  score: number;
+  passed: boolean;
+}
+
+/** Decile bucket for a 0–1 score; a perfect 1.0 folds into the top bucket. */
+function scoreBucket(score: number): number {
+  const index = Math.floor(score * DISTRIBUTION_BUCKET_COUNT);
+  return Math.min(Math.max(index, 0), DISTRIBUTION_BUCKET_COUNT - 1);
+}
+
+/** Tally first-attempt scores into the fixed-length decile distribution. */
+function buildDistribution(attempts: FirstAttempt[]): number[] {
+  const buckets = new Array<number>(DISTRIBUTION_BUCKET_COUNT).fill(0);
+  for (const attempt of attempts) buckets[scoreBucket(attempt.score)] += 1;
+  return buckets;
+}
+
+/**
+ * Quiz performance for one course — averages at course, module, lesson, and
+ * quiz altitude, score distributions, and high-failure flags — all on each
+ * student's FIRST attempt per quiz (PRD: measures teaching, not persistence).
+ * All-time: the PRD classes quiz stats as structural, exempt from range
+ * filtering.
+ *
+ * Two queries, then a pure roll-up: a catalog of every quiz in the course (so
+ * quizzes nobody attempted still appear, with null averages) and one
+ * first-attempt-per-student row set. First attempts are picked with a window
+ * over (quizId, userId) ordered by attempt time, the row id breaking ties, so
+ * retries never count. Unlike the funnels, attempts are NOT scoped to current
+ * enrollment — the PRD defines the basis as "each student's first attempt",
+ * full stop. A course with no quizzes yields an empty, non-broken result.
+ */
+export function getQuizPerformance(opts: {
+  courseId: number;
+}): CourseQuizPerformance {
+  const quizRows = db
+    .select({
+      quizId: quizzes.id,
+      quizTitle: quizzes.title,
+      lessonId: lessons.id,
+      lessonTitle: lessons.title,
+      moduleId: modules.id,
+      moduleTitle: modules.title,
+    })
+    .from(quizzes)
+    .innerJoin(lessons, eq(lessons.id, quizzes.lessonId))
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .where(eq(modules.courseId, opts.courseId))
+    .orderBy(asc(modules.position), asc(lessons.position), asc(quizzes.id))
+    .all();
+
+  if (quizRows.length === 0) {
+    return {
+      quizCount: 0,
+      avgScore: null,
+      attemptCount: 0,
+      distribution: new Array<number>(DISTRIBUTION_BUCKET_COUNT).fill(0),
+      flaggedQuizzes: [],
+      modules: [],
+    };
+  }
+
+  const ranked = db
+    .select({
+      quizId: quizAttempts.quizId,
+      score: quizAttempts.score,
+      passed: quizAttempts.passed,
+      rank: sql<number>`row_number() over (
+        partition by ${quizAttempts.quizId}, ${quizAttempts.userId}
+        order by ${quizAttempts.attemptedAt} asc, ${quizAttempts.id} asc
+      )`.as("rank"),
+    })
+    .from(quizAttempts)
+    .innerJoin(quizzes, eq(quizzes.id, quizAttempts.quizId))
+    .innerJoin(lessons, eq(lessons.id, quizzes.lessonId))
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .where(eq(modules.courseId, opts.courseId))
+    .as("ranked");
+
+  const firstAttempts = db
+    .select({
+      quizId: ranked.quizId,
+      score: ranked.score,
+      passed: ranked.passed,
+    })
+    .from(ranked)
+    .where(eq(ranked.rank, 1))
+    .all();
+
+  return rollUpQuizPerformance({ quizRows, firstAttempts });
+}
+
+/** Pure roll-up: fold first attempts into the course's quiz → lesson → module tree. */
+function rollUpQuizPerformance(opts: {
+  quizRows: Array<{
+    quizId: number;
+    quizTitle: string;
+    lessonId: number;
+    lessonTitle: string;
+    moduleId: number;
+    moduleTitle: string;
+  }>;
+  firstAttempts: FirstAttempt[];
+}): CourseQuizPerformance {
+  const attemptsByQuiz = new Map<number, FirstAttempt[]>();
+  for (const attempt of opts.firstAttempts) {
+    const list = attemptsByQuiz.get(attempt.quizId) ?? [];
+    list.push(attempt);
+    attemptsByQuiz.set(attempt.quizId, list);
+  }
+
+  const mean = (sum: number, count: number) => (count > 0 ? sum / count : null);
+
+  // Module/lesson order follows quizRows, which the query sorted by position.
+  const moduleOrder: number[] = [];
+  const moduleMap = new Map<
+    number,
+    {
+      moduleId: number;
+      moduleTitle: string;
+      lessonOrder: number[];
+      lessons: Map<
+        number,
+        { lessonId: number; lessonTitle: string; quizzes: QuizScoreStats[] }
+      >;
+    }
+  >();
+
+  for (const row of opts.quizRows) {
+    const attempts = attemptsByQuiz.get(row.quizId) ?? [];
+    const failures = attempts.filter((a) => !a.passed).length;
+    const scoreSum = attempts.reduce((sum, a) => sum + a.score, 0);
+    const studentCount = attempts.length;
+    const failRate = studentCount > 0 ? failures / studentCount : null;
+
+    const quizStats: QuizScoreStats = {
+      quizId: row.quizId,
+      quizTitle: row.quizTitle,
+      lessonId: row.lessonId,
+      lessonTitle: row.lessonTitle,
+      studentCount,
+      avgScore: mean(scoreSum, studentCount),
+      failRate,
+      isHighFailure:
+        failRate !== null &&
+        failRate >= HIGH_FAILURE_RATE_THRESHOLD &&
+        studentCount >= MIN_ATTEMPTS_FOR_FAILURE_FLAG,
+      distribution: buildDistribution(attempts),
+    };
+
+    let module = moduleMap.get(row.moduleId);
+    if (!module) {
+      module = {
+        moduleId: row.moduleId,
+        moduleTitle: row.moduleTitle,
+        lessonOrder: [],
+        lessons: new Map(),
+      };
+      moduleMap.set(row.moduleId, module);
+      moduleOrder.push(row.moduleId);
+    }
+
+    let lesson = module.lessons.get(row.lessonId);
+    if (!lesson) {
+      lesson = {
+        lessonId: row.lessonId,
+        lessonTitle: row.lessonTitle,
+        quizzes: [],
+      };
+      module.lessons.set(row.lessonId, lesson);
+      module.lessonOrder.push(row.lessonId);
+    }
+    lesson.quizzes.push(quizStats);
+  }
+
+  const modules: ModuleQuizStats[] = moduleOrder.map((moduleId) => {
+    const module = moduleMap.get(moduleId)!;
+    const lessons: LessonQuizStats[] = module.lessonOrder.map((lessonId) => {
+      const lesson = module.lessons.get(lessonId)!;
+      const studentCount = lesson.quizzes.reduce(
+        (sum, q) => sum + q.studentCount,
+        0
+      );
+      const scoreSum = lesson.quizzes.reduce(
+        (sum, q) => sum + (q.avgScore ?? 0) * q.studentCount,
+        0
+      );
+      return {
+        lessonId: lesson.lessonId,
+        lessonTitle: lesson.lessonTitle,
+        studentCount,
+        avgScore: mean(scoreSum, studentCount),
+        quizzes: lesson.quizzes,
+      };
+    });
+    const studentCount = lessons.reduce((sum, l) => sum + l.studentCount, 0);
+    const scoreSum = lessons.reduce(
+      (sum, l) => sum + (l.avgScore ?? 0) * l.studentCount,
+      0
+    );
+    return {
+      moduleId: module.moduleId,
+      moduleTitle: module.moduleTitle,
+      studentCount,
+      avgScore: mean(scoreSum, studentCount),
+      lessons,
+    };
+  });
+
+  const attemptCount = opts.firstAttempts.length;
+  const scoreSum = opts.firstAttempts.reduce((sum, a) => sum + a.score, 0);
+  const flaggedQuizzes = modules
+    .flatMap((m) => m.lessons)
+    .flatMap((l) => l.quizzes)
+    .filter((q) => q.isHighFailure);
+
+  return {
+    quizCount: opts.quizRows.length,
+    avgScore: mean(scoreSum, attemptCount),
+    attemptCount,
+    distribution: buildDistribution(opts.firstAttempts),
+    flaggedQuizzes,
+    modules,
+  };
 }

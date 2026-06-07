@@ -150,11 +150,11 @@ The quiz section of the drill-down, all metrics based on each student's first at
 
 ### Acceptance criteria
 
-- [ ] Average first-attempt scores shown per course, per module, and per lesson
-- [ ] Score distribution histogram renders per quiz/course
-- [ ] Quizzes meeting the failure-flag thresholds are visibly flagged; below-sample-size quizzes are not
-- [ ] Service tests: first-attempt selection with multiple attempts per student; flag threshold boundaries; quiz below minimum sample size
-- [ ] Courses without quizzes render an empty state, not a broken section
+- [x] Average first-attempt scores shown per course, per module, and per lesson
+- [x] Score distribution histogram renders per quiz/course
+- [x] Quizzes meeting the failure-flag thresholds are visibly flagged; below-sample-size quizzes are not
+- [x] Service tests: first-attempt selection with multiple attempts per student; flag threshold boundaries; quiz below minimum sample size
+- [x] Courses without quizzes render an empty state, not a broken section
 
 ---
 

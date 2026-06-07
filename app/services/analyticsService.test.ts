@@ -19,6 +19,7 @@ import {
   getEnrollmentTrend,
   getLessonFunnel,
   getOverviewStats,
+  getQuizPerformance,
   getRevenueTrend,
 } from "./analyticsService";
 
@@ -141,6 +142,40 @@ function createModuleWithLessons(opts: {
       .returning()
       .get()
   );
+}
+
+/** Creates a quiz on the given lesson; passingScore defaults to 0.6. */
+function createQuiz(opts: { lessonId: number; passingScore?: number }) {
+  return testDb
+    .insert(schema.quizzes)
+    .values({
+      lessonId: opts.lessonId,
+      title: "Quiz",
+      passingScore: opts.passingScore ?? 0.6,
+    })
+    .returning()
+    .get();
+}
+
+/** Records one quiz attempt; `passed` defaults to score ≥ 0.6. */
+function attemptQuiz(opts: {
+  userId: number;
+  quizId: number;
+  score: number;
+  passed?: boolean;
+  attemptedAt?: string;
+}) {
+  return testDb
+    .insert(schema.quizAttempts)
+    .values({
+      userId: opts.userId,
+      quizId: opts.quizId,
+      score: opts.score,
+      passed: opts.passed ?? opts.score >= 0.6,
+      attemptedAt: opts.attemptedAt,
+    })
+    .returning()
+    .get();
 }
 
 /** Creates and enrolls `count` students in the course. */
@@ -1268,6 +1303,247 @@ describe("analyticsService", () => {
       });
 
       expect(series).toEqual([]);
+    });
+  });
+
+  describe("getQuizPerformance", () => {
+    it("computes first-attempt averages at course, module, and lesson altitude", () => {
+      // Insert module 2 first so order must come from positions, not rowid.
+      const [lessonC] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 2,
+        lessonCount: 1,
+      });
+      const [lessonA, lessonB] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const quizA = createQuiz({ lessonId: lessonA.id });
+      const quizB = createQuiz({ lessonId: lessonB.id });
+      const quizC = createQuiz({ lessonId: lessonC.id });
+      const [s1, s2, s3] = enrollStudents({ courseId: base.course.id, count: 3 });
+
+      attemptQuiz({ userId: s1.id, quizId: quizA.id, score: 1.0 });
+      attemptQuiz({ userId: s2.id, quizId: quizA.id, score: 0.0 });
+      attemptQuiz({ userId: s1.id, quizId: quizB.id, score: 0.8 });
+      attemptQuiz({ userId: s1.id, quizId: quizC.id, score: 0.4 });
+      attemptQuiz({ userId: s2.id, quizId: quizC.id, score: 0.6 });
+      attemptQuiz({ userId: s3.id, quizId: quizC.id, score: 0.5 });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      // Course: (1.0 + 0.0 + 0.8 + 0.4 + 0.6 + 0.5) / 6 = 0.55
+      expect(perf.quizCount).toBe(3);
+      expect(perf.attemptCount).toBe(6);
+      expect(perf.avgScore).toBeCloseTo(0.55, 10);
+
+      const [module1, module2] = perf.modules;
+      // Module 1 = quizA + quizB attempts: (1.0 + 0.0 + 0.8) / 3 = 0.6
+      expect(module1.moduleTitle).toBe("Module 1");
+      expect(module1.studentCount).toBe(3);
+      expect(module1.avgScore).toBeCloseTo(0.6, 10);
+      // Module 2 = quizC: (0.4 + 0.6 + 0.5) / 3 = 0.5
+      expect(module2.moduleTitle).toBe("Module 2");
+      expect(module2.avgScore).toBeCloseTo(0.5, 10);
+
+      const [lessonStatsA, lessonStatsB] = module1.lessons;
+      expect(lessonStatsA.avgScore).toBeCloseTo(0.5, 10); // (1.0 + 0.0) / 2
+      expect(lessonStatsA.studentCount).toBe(2);
+      expect(lessonStatsB.avgScore).toBeCloseTo(0.8, 10); // single attempt
+      expect(lessonStatsB.studentCount).toBe(1);
+
+      // Quiz-level average rides along on the quiz stats.
+      expect(lessonStatsA.quizzes[0].avgScore).toBeCloseTo(0.5, 10);
+    });
+
+    it("uses each student's earliest attempt, ignoring retries", () => {
+      const [lesson] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 1,
+      });
+      const quiz = createQuiz({ lessonId: lesson.id });
+      const [student] = enrollStudents({ courseId: base.course.id, count: 1 });
+
+      // Later retry scores higher, but only the first attempt counts.
+      attemptQuiz({
+        userId: student.id,
+        quizId: quiz.id,
+        score: 0.3,
+        passed: false,
+        attemptedAt: "2026-06-01T00:00:00.000Z",
+      });
+      attemptQuiz({
+        userId: student.id,
+        quizId: quiz.id,
+        score: 0.9,
+        passed: true,
+        attemptedAt: "2026-06-02T00:00:00.000Z",
+      });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      expect(perf.attemptCount).toBe(1);
+      expect(perf.avgScore).toBeCloseTo(0.3, 10);
+      const quizStats = perf.modules[0].lessons[0].quizzes[0];
+      expect(quizStats.studentCount).toBe(1);
+      expect(quizStats.failRate).toBe(1); // the first attempt failed
+    });
+
+    it("buckets first-attempt scores into ten deciles, folding a perfect score into the top", () => {
+      const [lesson] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 1,
+      });
+      const quiz = createQuiz({ lessonId: lesson.id });
+      const [s1, s2, s3, s4] = enrollStudents({
+        courseId: base.course.id,
+        count: 4,
+      });
+      attemptQuiz({ userId: s1.id, quizId: quiz.id, score: 0.0 });
+      attemptQuiz({ userId: s2.id, quizId: quiz.id, score: 0.45 });
+      attemptQuiz({ userId: s3.id, quizId: quiz.id, score: 0.95 });
+      attemptQuiz({ userId: s4.id, quizId: quiz.id, score: 1.0 });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      // 0.0→[0], 0.45→[4], 0.95→[9], 1.0→[9] (folded).
+      const expected = [1, 0, 0, 0, 1, 0, 0, 0, 0, 2];
+      expect(perf.distribution).toEqual(expected);
+      expect(perf.modules[0].lessons[0].quizzes[0].distribution).toEqual(
+        expected
+      );
+    });
+
+    it("flags a quiz at the failure-rate and sample-size boundaries, but never below sample size", () => {
+      const [highFail, edgeRate, tooFew, lowFail] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 4,
+      });
+      const quizHighFail = createQuiz({ lessonId: highFail.id });
+      const quizEdgeRate = createQuiz({ lessonId: edgeRate.id });
+      const quizTooFew = createQuiz({ lessonId: tooFew.id });
+      const quizLowFail = createQuiz({ lessonId: lowFail.id });
+
+      const students = Array.from({ length: 6 }, (_, i) =>
+        createStudent(`quiz-student-${i}@example.com`)
+      );
+
+      // Exactly 5 students, 3 fail → failRate 0.6 ≥ 0.5: flagged (sample-size edge).
+      students.slice(0, 5).forEach((s, i) => {
+        attemptQuiz({
+          userId: s.id,
+          quizId: quizHighFail.id,
+          score: i < 3 ? 0.2 : 0.9,
+          passed: i >= 3,
+        });
+      });
+
+      // 6 students, exactly 3 fail → failRate exactly 0.5: flagged (rate edge, inclusive).
+      students.forEach((s, i) => {
+        attemptQuiz({
+          userId: s.id,
+          quizId: quizEdgeRate.id,
+          score: i < 3 ? 0.2 : 0.9,
+          passed: i >= 3,
+        });
+      });
+
+      // Only 4 students, all fail → failRate 1.0 but below the 5-student floor: not flagged.
+      students.slice(0, 4).forEach((s) => {
+        attemptQuiz({ userId: s.id, quizId: quizTooFew.id, score: 0.1, passed: false });
+      });
+
+      // 6 students, 2 fail → failRate ≈ 0.33 < 0.5: not flagged.
+      students.forEach((s, i) => {
+        attemptQuiz({
+          userId: s.id,
+          quizId: quizLowFail.id,
+          score: i < 2 ? 0.2 : 0.9,
+          passed: i >= 2,
+        });
+      });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      const flaggedIds = perf.flaggedQuizzes.map((q) => q.quizId).sort();
+      expect(flaggedIds).toEqual([quizHighFail.id, quizEdgeRate.id].sort());
+
+      const byId = new Map(
+        perf.modules
+          .flatMap((m) => m.lessons)
+          .flatMap((l) => l.quizzes)
+          .map((q) => [q.quizId, q])
+      );
+      expect(byId.get(quizHighFail.id)!.isHighFailure).toBe(true);
+      expect(byId.get(quizEdgeRate.id)!.failRate).toBeCloseTo(0.5, 10);
+      expect(byId.get(quizEdgeRate.id)!.isHighFailure).toBe(true);
+      expect(byId.get(quizTooFew.id)!.isHighFailure).toBe(false);
+      expect(byId.get(quizLowFail.id)!.isHighFailure).toBe(false);
+    });
+
+    it("includes never-attempted quizzes with null stats, not flagged", () => {
+      const [lesson] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 1,
+      });
+      createQuiz({ lessonId: lesson.id });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      expect(perf.quizCount).toBe(1);
+      expect(perf.attemptCount).toBe(0);
+      expect(perf.avgScore).toBeNull();
+      expect(perf.flaggedQuizzes).toEqual([]);
+      const quizStats = perf.modules[0].lessons[0].quizzes[0];
+      expect(quizStats.studentCount).toBe(0);
+      expect(quizStats.avgScore).toBeNull();
+      expect(quizStats.failRate).toBeNull();
+      expect(quizStats.isHighFailure).toBe(false);
+      expect(quizStats.distribution).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    });
+
+    it("returns an empty, non-broken result for a course with no quizzes", () => {
+      createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      expect(perf).toEqual({
+        quizCount: 0,
+        avgScore: null,
+        attemptCount: 0,
+        distribution: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        flaggedQuizzes: [],
+        modules: [],
+      });
+    });
+
+    it("does not count quizzes from another course", () => {
+      const other = createCourse({
+        instructorId: base.instructor.id,
+        slug: "other-quiz-course",
+      });
+      const [otherLesson] = createModuleWithLessons({
+        courseId: other.id,
+        modulePosition: 1,
+        lessonCount: 1,
+      });
+      const otherQuiz = createQuiz({ lessonId: otherLesson.id });
+      const [student] = enrollStudents({ courseId: other.id, count: 1 });
+      attemptQuiz({ userId: student.id, quizId: otherQuiz.id, score: 0.5 });
+
+      const perf = getQuizPerformance({ courseId: base.course.id });
+
+      expect(perf.quizCount).toBe(0);
+      expect(perf.modules).toEqual([]);
     });
   });
 });

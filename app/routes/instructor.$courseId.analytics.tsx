@@ -4,6 +4,7 @@ import {
   getCompletionTrend,
   getCourseFunnel,
   getLessonFunnel,
+  getQuizPerformance,
 } from "~/services/analyticsService";
 import { getCourseById } from "~/services/courseService";
 import { resolveDateRange } from "~/lib/date-range";
@@ -11,6 +12,7 @@ import { RangeSelector } from "~/components/range-selector";
 import { TrendChart } from "~/components/trend-chart";
 import { FunnelChart } from "~/components/funnel-chart";
 import { LessonDropoffFunnel } from "~/components/lesson-dropoff-funnel";
+import { QuizPerformance } from "~/components/quiz-performance";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -77,6 +79,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     funnel: getCourseFunnel({ courseId }),
     // Structural like the course funnel — all-time, ignores the URL range.
     lessonFunnel: getLessonFunnel({ courseId }),
+    quizPerformance: getQuizPerformance({ courseId }),
     completionTrend: getCompletionTrend({
       courseId,
       since: dateRange.since,
@@ -120,8 +123,14 @@ export function HydrateFallback() {
 }
 
 export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
-  const { course, dateRange, funnel, lessonFunnel, completionTrend } =
-    loaderData;
+  const {
+    course,
+    dateRange,
+    funnel,
+    lessonFunnel,
+    quizPerformance,
+    completionTrend,
+  } = loaderData;
 
   const neverStartedCount = funnel.enrolledCount - funnel.startedCount;
   const inProgressCount = funnel.startedCount - funnel.completedCount;
@@ -243,6 +252,33 @@ export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
                   steps={lessonFunnel}
                   enrolledCount={funnel.enrolledCount}
                 />
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Quiz performance — first-attempt basis, structural, all-time */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">
+                Quiz Performance{" "}
+                <span className="font-normal text-muted-foreground">
+                  · first attempts · all time
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {quizPerformance.quizCount === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  This course has no quizzes yet — add a quiz to a lesson to see
+                  how students score.
+                </p>
+              ) : quizPerformance.attemptCount === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No quiz attempts yet. Once students take a quiz, their
+                  first-attempt scores show up here.
+                </p>
+              ) : (
+                <QuizPerformance performance={quizPerformance} />
               )}
             </CardContent>
           </Card>
