@@ -14,6 +14,7 @@ import {
   courses,
   enrollments,
   lessonProgress,
+  LessonProgressStatus,
   lessons,
   modules,
   purchases,
@@ -423,4 +424,128 @@ export function getCourseFunnel(opts: { courseId: number }): CourseFunnel {
 
   // An aggregate without GROUP BY always yields exactly one row.
   return funnel!;
+}
+
+// ─── Lesson drop-off funnel ───
+
+/**
+ * Insight thresholds, mirroring the quiz high-failure flag convention (PRD:
+ * constants live in the service). A step is flagged when it loses at least
+ * half the students who completed the previous lesson, and enough students
+ * reached that point for the loss to be signal rather than noise.
+ */
+const LOW_RETENTION_THRESHOLD = 0.5;
+const MIN_PRIOR_COMPLETIONS_FOR_INSIGHT = 5;
+
+export interface LessonFunnelStep {
+  lessonId: number;
+  lessonTitle: string;
+  moduleTitle: string;
+  /**
+   * Distinct enrolled students who completed this lesson, all-time (the PRD
+   * classes the drop-off funnel as structural). A student's stop point is
+   * their furthest completed lesson, so each lesson counts independently —
+   * skipping a lesson doesn't erase credit for later ones.
+   */
+  completedCount: number;
+  /**
+   * Retention(N) = completed(N) ÷ completed(N−1). Null for the first lesson
+   * and whenever the previous step has zero completions — "no one left to
+   * retain" is not the same as 0% retention.
+   */
+  retentionRate: number | null;
+  /**
+   * The single worst retention step in the course. False everywhere when no
+   * step actually loses students — a lossless funnel has nothing to fix.
+   */
+  isBiggestDropoff: boolean;
+  /**
+   * Retention at or below LOW_RETENTION_THRESHOLD with at least
+   * MIN_PRIOR_COMPLETIONS_FOR_INSIGHT students completing the previous
+   * lesson; surfaced as an actionable insight callout in the UI.
+   */
+  isLowRetention: boolean;
+}
+
+/**
+ * Lesson-by-lesson drop-off funnel for one course, in course order (module
+ * position, then lesson position). One aggregate query: completions are
+ * grouped per lesson in a subquery before joining, and counted distinct per
+ * user, so duplicate progress rows or double enrollments cannot inflate the
+ * counts. A course with no lessons yields an empty array; lessons nobody
+ * completed yield zero counts, not missing rows.
+ */
+export function getLessonFunnel(opts: { courseId: number }): LessonFunnelStep[] {
+  const completionStats = db
+    .select({
+      lessonId: lessonProgress.lessonId,
+      completedCount: sql<number>`count(distinct ${lessonProgress.userId})`.as(
+        "completed_count"
+      ),
+    })
+    .from(lessonProgress)
+    // The enrollment join scopes counts to enrolled students, matching the
+    // course funnel's treatment of progress from non-enrolled users.
+    .innerJoin(
+      enrollments,
+      and(
+        eq(enrollments.userId, lessonProgress.userId),
+        eq(enrollments.courseId, opts.courseId)
+      )
+    )
+    .where(eq(lessonProgress.status, LessonProgressStatus.Completed))
+    .groupBy(lessonProgress.lessonId)
+    .as("completion_stats");
+
+  const rows = db
+    .select({
+      lessonId: lessons.id,
+      lessonTitle: lessons.title,
+      moduleTitle: modules.title,
+      completedCount: sql<number>`coalesce(${completionStats.completedCount}, 0)`,
+    })
+    .from(lessons)
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .leftJoin(completionStats, eq(completionStats.lessonId, lessons.id))
+    .where(eq(modules.courseId, opts.courseId))
+    .orderBy(asc(modules.position), asc(lessons.position))
+    .all();
+
+  return annotateLessonFunnel(rows);
+}
+
+/** Pure post-pass: derive retention and the two flags from ordered counts. */
+function annotateLessonFunnel(
+  rows: Array<Pick<LessonFunnelStep, "lessonId" | "lessonTitle" | "moduleTitle" | "completedCount">>
+): LessonFunnelStep[] {
+  const retentionRates = rows.map((row, index) => {
+    if (index === 0) return null;
+    const priorCompleted = rows[index - 1].completedCount;
+    return priorCompleted > 0 ? row.completedCount / priorCompleted : null;
+  });
+
+  // Lowest retention wins; ties go to the earliest step, where the loss hits
+  // first. Steps with retention ≥ 1 lose nobody, so they never qualify.
+  let biggestDropoffIndex = -1;
+  let worstRetention = 1;
+  retentionRates.forEach((retentionRate, index) => {
+    if (retentionRate !== null && retentionRate < worstRetention) {
+      worstRetention = retentionRate;
+      biggestDropoffIndex = index;
+    }
+  });
+
+  return rows.map((row, index) => {
+    const retentionRate = retentionRates[index];
+    const priorCompleted = index > 0 ? rows[index - 1].completedCount : 0;
+    return {
+      ...row,
+      retentionRate,
+      isBiggestDropoff: index === biggestDropoffIndex,
+      isLowRetention:
+        retentionRate !== null &&
+        retentionRate <= LOW_RETENTION_THRESHOLD &&
+        priorCompleted >= MIN_PRIOR_COMPLETIONS_FOR_INSIGHT,
+    };
+  });
 }

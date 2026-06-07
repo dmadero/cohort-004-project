@@ -3,12 +3,14 @@ import type { Route } from "./+types/instructor.$courseId.analytics";
 import {
   getCompletionTrend,
   getCourseFunnel,
+  getLessonFunnel,
 } from "~/services/analyticsService";
 import { getCourseById } from "~/services/courseService";
 import { resolveDateRange } from "~/lib/date-range";
 import { RangeSelector } from "~/components/range-selector";
 import { TrendChart } from "~/components/trend-chart";
 import { FunnelChart } from "~/components/funnel-chart";
+import { LessonDropoffFunnel } from "~/components/lesson-dropoff-funnel";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -73,6 +75,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     course,
     dateRange,
     funnel: getCourseFunnel({ courseId }),
+    // Structural like the course funnel — all-time, ignores the URL range.
+    lessonFunnel: getLessonFunnel({ courseId }),
     completionTrend: getCompletionTrend({
       courseId,
       since: dateRange.since,
@@ -100,13 +104,24 @@ export function HydrateFallback() {
             </CardContent>
           </Card>
         ))}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <Skeleton className="h-5 w-44" />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-9 w-full" />
+            ))}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 }
 
 export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
-  const { course, dateRange, funnel, completionTrend } = loaderData;
+  const { course, dateRange, funnel, lessonFunnel, completionTrend } =
+    loaderData;
 
   const neverStartedCount = funnel.enrolledCount - funnel.startedCount;
   const inProgressCount = funnel.startedCount - funnel.completedCount;
@@ -199,6 +214,36 @@ export default function CourseAnalytics({ loaderData }: Route.ComponentProps) {
                 granularity={dateRange.granularity}
                 label="Completions"
               />
+            </CardContent>
+          </Card>
+
+          {/* Lesson drop-off funnel — structural, all-time */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">
+                Lesson Drop-off{" "}
+                <span className="font-normal text-muted-foreground">
+                  · all time
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {lessonFunnel.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  This course has no lessons yet — add content to see where
+                  students drop off.
+                </p>
+              ) : lessonFunnel.every((step) => step.completedCount === 0) ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No lesson completions yet. Once students finish lessons, the
+                  drop-off funnel shows up here.
+                </p>
+              ) : (
+                <LessonDropoffFunnel
+                  steps={lessonFunnel}
+                  enrolledCount={funnel.enrolledCount}
+                />
+              )}
             </CardContent>
           </Card>
         </div>

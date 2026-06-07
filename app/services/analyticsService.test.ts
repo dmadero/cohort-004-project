@@ -17,6 +17,7 @@ import {
   getCourseFunnel,
   getCourseStats,
   getEnrollmentTrend,
+  getLessonFunnel,
   getOverviewStats,
   getRevenueTrend,
 } from "./analyticsService";
@@ -99,6 +100,56 @@ function recordProgress(opts: { userId: number; lessonId: number }) {
     })
     .returning()
     .get();
+}
+
+function completeLesson(opts: { userId: number; lessonId: number }) {
+  return testDb
+    .insert(schema.lessonProgress)
+    .values({
+      userId: opts.userId,
+      lessonId: opts.lessonId,
+      status: schema.LessonProgressStatus.Completed,
+      completedAt: "2026-06-01T00:00:00.000Z",
+    })
+    .returning()
+    .get();
+}
+
+/** Creates a module at the given position with `lessonCount` ordered lessons. */
+function createModuleWithLessons(opts: {
+  courseId: number;
+  modulePosition: number;
+  lessonCount: number;
+}) {
+  const module = testDb
+    .insert(schema.modules)
+    .values({
+      courseId: opts.courseId,
+      title: `Module ${opts.modulePosition}`,
+      position: opts.modulePosition,
+    })
+    .returning()
+    .get();
+  return Array.from({ length: opts.lessonCount }, (_, i) =>
+    testDb
+      .insert(schema.lessons)
+      .values({
+        moduleId: module.id,
+        title: `Lesson ${opts.modulePosition}.${i + 1}`,
+        position: i + 1,
+      })
+      .returning()
+      .get()
+  );
+}
+
+/** Creates and enrolls `count` students in the course. */
+function enrollStudents(opts: { courseId: number; count: number }) {
+  return Array.from({ length: opts.count }, (_, i) => {
+    const student = createStudent(`student-${i}@example.com`);
+    enroll({ userId: student.id, courseId: opts.courseId });
+    return student;
+  });
 }
 
 describe("analyticsService", () => {
@@ -836,6 +887,284 @@ describe("analyticsService", () => {
         startedCount: 0,
         completedCount: 0,
       });
+    });
+  });
+
+  describe("getLessonFunnel", () => {
+    it("lists lessons in course order with completion counts and retention rates", () => {
+      // Insert the later module first so ordering must come from positions,
+      // not insertion order.
+      const [lessonC] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 2,
+        lessonCount: 1,
+      });
+      const [lessonA, lessonB] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const [s1, s2, s3, s4] = enrollStudents({
+        courseId: base.course.id,
+        count: 4,
+      });
+      for (const student of [s1, s2, s3, s4]) {
+        completeLesson({ userId: student.id, lessonId: lessonA.id });
+      }
+      for (const student of [s1, s2]) {
+        completeLesson({ userId: student.id, lessonId: lessonB.id });
+      }
+      completeLesson({ userId: s1.id, lessonId: lessonC.id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel).toEqual([
+        {
+          lessonId: lessonA.id,
+          lessonTitle: "Lesson 1.1",
+          moduleTitle: "Module 1",
+          completedCount: 4,
+          retentionRate: null,
+          isBiggestDropoff: false,
+          isLowRetention: false,
+        },
+        {
+          lessonId: lessonB.id,
+          lessonTitle: "Lesson 1.2",
+          moduleTitle: "Module 1",
+          completedCount: 2,
+          retentionRate: 0.5,
+          // Ties on worst retention go to the earliest step.
+          isBiggestDropoff: true,
+          isLowRetention: false, // only 4 completed the prior lesson — below sample size
+        },
+        {
+          lessonId: lessonC.id,
+          lessonTitle: "Lesson 2.1",
+          moduleTitle: "Module 2",
+          completedCount: 1,
+          retentionRate: 0.5,
+          isBiggestDropoff: false,
+          isLowRetention: false,
+        },
+      ]);
+    });
+
+    it("counts only completed progress from enrolled students", () => {
+      const [lesson] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 1,
+      });
+      const [enrolled] = enrollStudents({ courseId: base.course.id, count: 1 });
+      completeLesson({ userId: enrolled.id, lessonId: lesson.id });
+      // In-progress is "started", not "completed".
+      recordProgress({ userId: base.user.id, lessonId: lesson.id });
+      // Completion without an enrollment doesn't count.
+      const browser = createStudent("browser@example.com");
+      completeLesson({ userId: browser.id, lessonId: lesson.id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.completedCount)).toEqual([1]);
+    });
+
+    it("treats a skipped lesson as the stop point's gap: zero count, then undefined retention", () => {
+      const [lesson1, , lesson3] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 3,
+      });
+      const [student] = enrollStudents({ courseId: base.course.id, count: 1 });
+      // Stop point = furthest completed lesson (lesson 3); lesson 2 skipped.
+      completeLesson({ userId: student.id, lessonId: lesson1.id });
+      completeLesson({ userId: student.id, lessonId: lesson3.id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(
+        funnel.map(({ completedCount, retentionRate }) => ({
+          completedCount,
+          retentionRate,
+        }))
+      ).toEqual([
+        { completedCount: 1, retentionRate: null },
+        { completedCount: 0, retentionRate: 0 },
+        // Nobody completed lesson 2, so lesson 3 has no one to retain from.
+        { completedCount: 1, retentionRate: null },
+      ]);
+    });
+
+    it("flags only the single worst retention step as the biggest drop-off", () => {
+      const lessons = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 4,
+      });
+      const [s1, s2, s3, s4] = enrollStudents({
+        courseId: base.course.id,
+        count: 4,
+      });
+      // Completions 4 → 3 → 1 → 1: retentions 75%, 33%, 100%.
+      for (const student of [s1, s2, s3, s4]) {
+        completeLesson({ userId: student.id, lessonId: lessons[0].id });
+      }
+      for (const student of [s1, s2, s3]) {
+        completeLesson({ userId: student.id, lessonId: lessons[1].id });
+      }
+      completeLesson({ userId: s1.id, lessonId: lessons[2].id });
+      completeLesson({ userId: s1.id, lessonId: lessons[3].id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.isBiggestDropoff)).toEqual([
+        false,
+        false,
+        true,
+        false,
+      ]);
+    });
+
+    it("flags no biggest drop-off when no lesson loses students", () => {
+      const lessons = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const students = enrollStudents({ courseId: base.course.id, count: 2 });
+      for (const student of students) {
+        for (const lesson of lessons) {
+          completeLesson({ userId: student.id, lessonId: lesson.id });
+        }
+      }
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.isBiggestDropoff)).toEqual([
+        false,
+        false,
+      ]);
+    });
+
+    it("surfaces a low-retention insight at the 50% threshold with enough prior completions", () => {
+      const [lesson1, lesson2] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const students = enrollStudents({ courseId: base.course.id, count: 6 });
+      for (const student of students) {
+        completeLesson({ userId: student.id, lessonId: lesson1.id });
+      }
+      // Exactly half retained from exactly-enough prior completions.
+      for (const student of students.slice(0, 3)) {
+        completeLesson({ userId: student.id, lessonId: lesson2.id });
+      }
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.isLowRetention)).toEqual([false, true]);
+    });
+
+    it("does not flag low retention below the minimum sample size", () => {
+      const [lesson1, lesson2] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const students = enrollStudents({ courseId: base.course.id, count: 4 });
+      for (const student of students) {
+        completeLesson({ userId: student.id, lessonId: lesson1.id });
+      }
+      // 25% retention, but only 4 students completed the prior lesson.
+      completeLesson({ userId: students[0].id, lessonId: lesson2.id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.isLowRetention)).toEqual([
+        false,
+        false,
+      ]);
+    });
+
+    it("does not flag retention above the 50% threshold", () => {
+      const [lesson1, lesson2] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const students = enrollStudents({ courseId: base.course.id, count: 6 });
+      for (const student of students) {
+        completeLesson({ userId: student.id, lessonId: lesson1.id });
+      }
+      for (const student of students.slice(0, 4)) {
+        completeLesson({ userId: student.id, lessonId: lesson2.id });
+      }
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.isLowRetention)).toEqual([
+        false,
+        false,
+      ]);
+    });
+
+    it("counts a student once per lesson despite duplicate progress rows", () => {
+      const [lesson] = createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 1,
+      });
+      const [student] = enrollStudents({ courseId: base.course.id, count: 1 });
+      completeLesson({ userId: student.id, lessonId: lesson.id });
+      completeLesson({ userId: student.id, lessonId: lesson.id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(funnel.map((step) => step.completedCount)).toEqual([1]);
+    });
+
+    it("returns an empty array for a course with no lessons", () => {
+      enrollStudents({ courseId: base.course.id, count: 1 });
+
+      expect(getLessonFunnel({ courseId: base.course.id })).toEqual([]);
+    });
+
+    it("returns zero counts with no flags when nobody completed any lesson", () => {
+      createModuleWithLessons({
+        courseId: base.course.id,
+        modulePosition: 1,
+        lessonCount: 2,
+      });
+      const [student] = enrollStudents({ courseId: base.course.id, count: 1 });
+      const [lesson] = testDb.select().from(schema.lessons).all();
+      recordProgress({ userId: student.id, lessonId: lesson.id });
+
+      const funnel = getLessonFunnel({ courseId: base.course.id });
+
+      expect(
+        funnel.map(
+          ({ completedCount, retentionRate, isBiggestDropoff, isLowRetention }) => ({
+            completedCount,
+            retentionRate,
+            isBiggestDropoff,
+            isLowRetention,
+          })
+        )
+      ).toEqual([
+        {
+          completedCount: 0,
+          retentionRate: null,
+          isBiggestDropoff: false,
+          isLowRetention: false,
+        },
+        {
+          completedCount: 0,
+          retentionRate: null,
+          isBiggestDropoff: false,
+          isLowRetention: false,
+        },
+      ]);
     });
   });
 
