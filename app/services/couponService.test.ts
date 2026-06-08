@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 
@@ -69,7 +70,12 @@ describe("couponService", () => {
     it("generates the requested number of coupons", () => {
       const { team, purchase } = setupTeamAndPurchase();
 
-      const result = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 5 });
+      const result = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 5,
+      });
 
       expect(result).toHaveLength(5);
     });
@@ -77,7 +83,12 @@ describe("couponService", () => {
     it("generates unique codes for each coupon", () => {
       const { team, purchase } = setupTeamAndPurchase();
 
-      const result = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 10 });
+      const result = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 10,
+      });
       const codes = result.map((c) => c.code);
       const uniqueCodes = new Set(codes);
 
@@ -87,7 +98,12 @@ describe("couponService", () => {
     it("associates coupons with the correct team, course, and purchase", () => {
       const { team, purchase } = setupTeamAndPurchase();
 
-      const result = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const result = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
 
       expect(result[0].teamId).toBe(team.id);
       expect(result[0].courseId).toBe(base.course.id);
@@ -100,7 +116,12 @@ describe("couponService", () => {
   describe("getCouponByCode", () => {
     it("returns a coupon by its code", () => {
       const { team, purchase } = setupTeamAndPurchase();
-      const [coupon] = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
 
       const found = getCouponByCode(coupon.code);
 
@@ -118,7 +139,12 @@ describe("couponService", () => {
   describe("getCouponsForTeam", () => {
     it("returns all coupons for a team", () => {
       const { team, purchase } = setupTeamAndPurchase();
-      generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 3 });
+      generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 3,
+      });
 
       const result = getCouponsForTeam({ teamId: team.id });
 
@@ -153,13 +179,29 @@ describe("couponService", () => {
         .returning()
         .get();
 
-      generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 3 });
-      generateCoupons({ teamId: team.id, courseId: course2.id, purchaseId: purchase2.id, quantity: 2 });
+      generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 3,
+      });
+      generateCoupons({
+        teamId: team.id,
+        courseId: course2.id,
+        purchaseId: purchase2.id,
+        quantity: 2,
+      });
 
-      const filtered = getCouponsForTeam({ teamId: team.id, courseId: base.course.id });
+      const filtered = getCouponsForTeam({
+        teamId: team.id,
+        courseId: base.course.id,
+      });
       expect(filtered).toHaveLength(3);
 
-      const filtered2 = getCouponsForTeam({ teamId: team.id, courseId: course2.id });
+      const filtered2 = getCouponsForTeam({
+        teamId: team.id,
+        courseId: course2.id,
+      });
       expect(filtered2).toHaveLength(2);
 
       const all = getCouponsForTeam({ teamId: team.id });
@@ -170,10 +212,19 @@ describe("couponService", () => {
   describe("redeemCoupon", () => {
     it("redeems a valid coupon and enrolls the user", () => {
       const { team, purchase } = setupTeamAndPurchase();
-      const [coupon] = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
       const redeemer = createRedeemer();
 
-      const result = redeemCoupon({ code: coupon.code, userId: redeemer.id, userCountry: "US" });
+      const result = redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -188,7 +239,11 @@ describe("couponService", () => {
     });
 
     it("rejects redemption of a nonexistent code", () => {
-      const result = redeemCoupon({ code: "nonexistent-code", userId: 999, userCountry: "US" });
+      const result = redeemCoupon({
+        code: "nonexistent-code",
+        userId: 999,
+        userCountry: "US",
+      });
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -198,11 +253,20 @@ describe("couponService", () => {
 
     it("rejects redemption of an already-consumed coupon", () => {
       const { team, purchase } = setupTeamAndPurchase();
-      const [coupon] = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
       const redeemer = createRedeemer();
 
       // First redemption succeeds
-      redeemCoupon({ code: coupon.code, userId: redeemer.id, userCountry: "US" });
+      redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
 
       // Second redemption (different user) fails
       const anotherUser = testDb
@@ -215,7 +279,11 @@ describe("couponService", () => {
         .returning()
         .get();
 
-      const result = redeemCoupon({ code: coupon.code, userId: anotherUser.id, userCountry: "US" });
+      const result = redeemCoupon({
+        code: coupon.code,
+        userId: anotherUser.id,
+        userCountry: "US",
+      });
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -225,7 +293,12 @@ describe("couponService", () => {
 
     it("rejects redemption when user is already enrolled (coupon stays unconsumed)", () => {
       const { team, purchase } = setupTeamAndPurchase();
-      const [coupon] = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
       const redeemer = createRedeemer();
 
       // Enroll the user first (outside the coupon flow)
@@ -234,7 +307,11 @@ describe("couponService", () => {
         .values({ userId: redeemer.id, courseId: base.course.id })
         .run();
 
-      const result = redeemCoupon({ code: coupon.code, userId: redeemer.id, userCountry: "US" });
+      const result = redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -248,10 +325,19 @@ describe("couponService", () => {
 
     it("rejects redemption from a different country", () => {
       const { team, purchase } = setupTeamAndPurchase("US");
-      const [coupon] = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
       const redeemer = createRedeemer();
 
-      const result = redeemCoupon({ code: coupon.code, userId: redeemer.id, userCountry: "PL" });
+      const result = redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "PL",
+      });
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -267,12 +353,176 @@ describe("couponService", () => {
 
     it("allows redemption when purchase has no country set", () => {
       const { team, purchase } = setupTeamAndPurchase(null);
-      const [coupon] = generateCoupons({ teamId: team.id, courseId: base.course.id, purchaseId: purchase.id, quantity: 1 });
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
       const redeemer = createRedeemer();
 
-      const result = redeemCoupon({ code: coupon.code, userId: redeemer.id, userCountry: "PL" });
+      const result = redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "PL",
+      });
 
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("coupon redemption notifications", () => {
+    function getNotificationsFor(recipientUserId: number) {
+      return testDb
+        .select()
+        .from(schema.notifications)
+        .where(eq(schema.notifications.recipientUserId, recipientUserId))
+        .all();
+    }
+
+    it("notifies the team admin when a coupon is redeemed", () => {
+      const { team, purchase } = setupTeamAndPurchase();
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
+      const redeemer = createRedeemer();
+
+      redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
+
+      // base.user is the team admin (see setupTeamAndPurchase)
+      expect(getNotificationsFor(base.user.id)).toHaveLength(1);
+    });
+
+    it("populates the notification with the correct fields and seat counts", () => {
+      const { team, purchase } = setupTeamAndPurchase();
+      // 3 seats for this course; redeeming one leaves 2 of 3 remaining
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 3,
+      });
+      const redeemer = createRedeemer();
+
+      redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
+
+      const [notification] = getNotificationsFor(base.user.id);
+      expect(notification.type).toBe(schema.NotificationType.CouponRedemption);
+      expect(notification.title).toBe("Seat Claimed");
+      expect(notification.message).toBe(
+        "Redeemer redeemed a coupon for Test Course (2 of 3 seats remaining)"
+      );
+      expect(notification.linkUrl).toBe("/team");
+      expect(notification.isRead).toBe(false);
+    });
+
+    it("notifies every admin of the team", () => {
+      const { team, purchase } = setupTeamAndPurchase();
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
+      const redeemer = createRedeemer();
+
+      // A second admin on the same team
+      const secondAdmin = testDb
+        .insert(schema.users)
+        .values({
+          name: "Second Admin",
+          email: "second-admin@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+      testDb
+        .insert(schema.teamMembers)
+        .values({
+          teamId: team.id,
+          userId: secondAdmin.id,
+          role: schema.TeamMemberRole.Admin,
+        })
+        .run();
+
+      redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
+
+      expect(getNotificationsFor(base.user.id)).toHaveLength(1);
+      expect(getNotificationsFor(secondAdmin.id)).toHaveLength(1);
+    });
+
+    it("does not notify non-admin team members", () => {
+      const { team, purchase } = setupTeamAndPurchase();
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
+      const redeemer = createRedeemer();
+
+      // A regular (non-admin) member on the same team
+      const member = testDb
+        .insert(schema.users)
+        .values({
+          name: "Plain Member",
+          email: "member@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+      testDb
+        .insert(schema.teamMembers)
+        .values({
+          teamId: team.id,
+          userId: member.id,
+          role: schema.TeamMemberRole.Member,
+        })
+        .run();
+
+      redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "US",
+      });
+
+      expect(getNotificationsFor(member.id)).toHaveLength(0);
+    });
+
+    it("does not create a notification when redemption fails", () => {
+      const { team, purchase } = setupTeamAndPurchase("US");
+      const [coupon] = generateCoupons({
+        teamId: team.id,
+        courseId: base.course.id,
+        purchaseId: purchase.id,
+        quantity: 1,
+      });
+      const redeemer = createRedeemer();
+
+      // Country mismatch → redemption rejected
+      const result = redeemCoupon({
+        code: coupon.code,
+        userId: redeemer.id,
+        userCountry: "PL",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(getNotificationsFor(base.user.id)).toHaveLength(0);
     });
   });
 });

@@ -40,6 +40,7 @@ export enum TeamMemberRole {
 
 export enum NotificationType {
   Enrollment = "enrollment",
+  CouponRedemption = "coupon_redemption",
 }
 
 // ─── Tables ───
@@ -132,7 +133,9 @@ export const enrollments = sqliteTable(
     completedAt: text("completed_at"),
   },
   // Analytics hot path: per-course enrollment counts and date-bucketed trends.
-  (t) => [index("enrollments_course_id_enrolled_at_idx").on(t.courseId, t.enrolledAt)]
+  (t) => [
+    index("enrollments_course_id_enrolled_at_idx").on(t.courseId, t.enrolledAt),
+  ]
 );
 
 export const lessonProgress = sqliteTable(
@@ -149,7 +152,9 @@ export const lessonProgress = sqliteTable(
     completedAt: text("completed_at"),
   },
   // Analytics hot path: started/completed counts in the lesson drop-off funnel.
-  (t) => [index("lesson_progress_lesson_id_status_idx").on(t.lessonId, t.status)]
+  (t) => [
+    index("lesson_progress_lesson_id_status_idx").on(t.lessonId, t.status),
+  ]
 );
 
 export const courseReviews = sqliteTable(
@@ -258,7 +263,9 @@ export const purchases = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   // Analytics hot path: per-course earnings and date-bucketed revenue trends.
-  (t) => [index("purchases_course_id_created_at_idx").on(t.courseId, t.createdAt)]
+  (t) => [
+    index("purchases_course_id_created_at_idx").on(t.courseId, t.createdAt),
+  ]
 );
 
 export const teams = sqliteTable("teams", {

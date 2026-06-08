@@ -1,6 +1,16 @@
 import { eq, and, isNull } from "drizzle-orm";
 import { db } from "~/db";
-import { coupons, purchases, enrollments } from "~/db/schema";
+import {
+  coupons,
+  purchases,
+  enrollments,
+  users,
+  courses,
+  teamMembers,
+  TeamMemberRole,
+  NotificationType,
+} from "~/db/schema";
+import { createNotification } from "~/services/notificationService";
 import crypto from "crypto";
 
 // ─── Coupon Service ───
@@ -118,5 +128,68 @@ export function redeemCoupon(opts: {
     .returning()
     .get();
 
+  notifyTeamAdminsOfRedemption({
+    teamId: coupon.teamId,
+    courseId: coupon.courseId,
+    redeemerUserId: userId,
+  });
+
   return { ok: true, enrollment };
+}
+
+// Notify every admin of the owning team that a seat was claimed. Looked up
+// here (rather than passed in) so every redemption path stays notified, and
+// guarded so a missing user/course can't fail the redemption itself. Seat
+// counts are a snapshot at this moment — baked into the message text.
+function notifyTeamAdminsOfRedemption(opts: {
+  teamId: number;
+  courseId: number;
+  redeemerUserId: number;
+}) {
+  const { teamId, courseId, redeemerUserId } = opts;
+
+  const redeemer = db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, redeemerUserId))
+    .get();
+  const course = db
+    .select({ title: courses.title })
+    .from(courses)
+    .where(eq(courses.id, courseId))
+    .get();
+  if (!redeemer || !course) return;
+
+  const teamCoupons = db
+    .select()
+    .from(coupons)
+    .where(and(eq(coupons.teamId, teamId), eq(coupons.courseId, courseId)))
+    .all();
+  const totalSeats = teamCoupons.length;
+  const remainingSeats = teamCoupons.filter(
+    (c) => c.redeemedByUserId === null
+  ).length;
+
+  const admins = db
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(
+      and(
+        eq(teamMembers.teamId, teamId),
+        eq(teamMembers.role, TeamMemberRole.Admin)
+      )
+    )
+    .all();
+
+  const message = `${redeemer.name} redeemed a coupon for ${course.title} (${remainingSeats} of ${totalSeats} seats remaining)`;
+
+  for (const admin of admins) {
+    createNotification({
+      recipientUserId: admin.userId,
+      type: NotificationType.CouponRedemption,
+      title: "Seat Claimed",
+      message,
+      linkUrl: "/team",
+    });
+  }
 }

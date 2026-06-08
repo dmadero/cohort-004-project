@@ -135,7 +135,7 @@ export function Sidebar({
         <NavLink to="/" className="text-lg font-bold tracking-tight">
           Cadence
         </NavLink>
-        {isInstructor && (
+        {(isInstructor || isTeamAdmin) && (
           <NotificationBell
             unreadCount={unreadCount}
             notifications={notifications}

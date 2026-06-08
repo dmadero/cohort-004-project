@@ -51,11 +51,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
     : [];
 
-  // Notifications are an instructor-only feature; skip the queries entirely
-  // for everyone else so the bell never renders for students/admins.
+  // Notifications are shown to instructors (enrollment alerts) and team admins
+  // (coupon redemption alerts); skip the queries entirely for everyone else so
+  // the bell never renders for plain students.
   const isInstructor = currentUser?.role === UserRole.Instructor;
+  const userIsTeamAdmin = currentUserId ? isTeamAdmin(currentUserId) : false;
+  const canSeeNotifications = isInstructor || userIsTeamAdmin;
   const notifications =
-    isInstructor && currentUserId
+    canSeeNotifications && currentUserId
       ? getNotifications({ userId: currentUserId, limit: 5, offset: 0 }).map(
           (n) => ({
             id: n.id,
@@ -68,7 +71,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         )
       : [];
   const unreadCount =
-    isInstructor && currentUserId ? getUnreadCount(currentUserId) : 0;
+    canSeeNotifications && currentUserId ? getUnreadCount(currentUserId) : 0;
 
   return {
     users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
@@ -86,7 +89,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     devCountry,
     countryTierInfo,
     countries: COUNTRIES,
-    isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
+    isTeamAdmin: userIsTeamAdmin,
   };
 }
 
