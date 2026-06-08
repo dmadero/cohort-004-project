@@ -13,6 +13,11 @@ import {
 } from "~/services/progressService";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { isTeamAdmin } from "~/services/teamService";
+import {
+  getNotifications,
+  getUnreadCount,
+} from "~/services/notificationService";
+import { UserRole } from "~/db/schema";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const users = getAllUsers();
@@ -46,8 +51,29 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
     : [];
 
+  // Notifications are an instructor-only feature; skip the queries entirely
+  // for everyone else so the bell never renders for students/admins.
+  const isInstructor = currentUser?.role === UserRole.Instructor;
+  const notifications =
+    isInstructor && currentUserId
+      ? getNotifications({ userId: currentUserId, limit: 5, offset: 0 }).map(
+          (n) => ({
+            id: n.id,
+            title: n.title,
+            message: n.message,
+            linkUrl: n.linkUrl,
+            isRead: n.isRead,
+            createdAt: n.createdAt,
+          })
+        )
+      : [];
+  const unreadCount =
+    isInstructor && currentUserId ? getUnreadCount(currentUserId) : 0;
+
   return {
     users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
+    notifications,
+    unreadCount,
     currentUser: currentUser
       ? {
           id: currentUser.id,
@@ -73,6 +99,8 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countryTierInfo,
     countries,
     isTeamAdmin: userIsTeamAdmin,
+    notifications,
+    unreadCount,
   } = loaderData;
 
   return (
@@ -81,6 +109,8 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
         currentUser={currentUser}
         recentCourses={recentCourses}
         isTeamAdmin={userIsTeamAdmin}
+        notifications={notifications}
+        unreadCount={unreadCount}
       />
       <main className="flex-1 overflow-y-auto">
         <Outlet />

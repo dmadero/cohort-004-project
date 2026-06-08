@@ -38,6 +38,10 @@ export enum TeamMemberRole {
   Member = "member",
 }
 
+export enum NotificationType {
+  Enrollment = "enrollment",
+}
+
 // ─── Tables ───
 
 export const users = sqliteTable("users", {
@@ -348,6 +352,33 @@ export const lessonBookmarks = sqliteTable(
   },
   // One bookmark per student per lesson — toggle is a delete/insert pair.
   (t) => [unique().on(t.userId, t.lessonId)]
+);
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recipientUserId: integer("recipient_user_id")
+      .notNull()
+      .references(() => users.id),
+    // Generic event type (e.g. "enrollment"); extensible to future types
+    // without a schema change — see NotificationType.
+    type: text("type").notNull().$type<NotificationType>(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    linkUrl: text("link_url").notNull(),
+    isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  // Bell badge + dropdown hot path: a recipient's notifications, newest first.
+  (t) => [
+    index("notifications_recipient_user_id_created_at_idx").on(
+      t.recipientUserId,
+      t.createdAt
+    ),
+  ]
 );
 
 export const videoWatchEvents = sqliteTable("video_watch_events", {

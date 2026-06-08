@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 
@@ -117,6 +118,57 @@ describe("enrollmentService", () => {
         skipValidation: false,
       });
       expect(enrollment).toBeDefined();
+    });
+  });
+
+  describe("enrollment notifications", () => {
+    function getNotificationsFor(recipientUserId: number) {
+      return testDb
+        .select()
+        .from(schema.notifications)
+        .where(eq(schema.notifications.recipientUserId, recipientUserId))
+        .all();
+    }
+
+    it("creates a notification for the course's instructor on enrollment", () => {
+      enrollUser({
+        userId: base.user.id,
+        courseId: base.course.id,
+        sendEmail: false,
+        skipValidation: false,
+      });
+
+      const instructorNotifications = getNotificationsFor(base.instructor.id);
+      expect(instructorNotifications).toHaveLength(1);
+    });
+
+    it("populates the notification with the correct fields", () => {
+      enrollUser({
+        userId: base.user.id,
+        courseId: base.course.id,
+        sendEmail: false,
+        skipValidation: false,
+      });
+
+      const [notification] = getNotificationsFor(base.instructor.id);
+      expect(notification.type).toBe(schema.NotificationType.Enrollment);
+      expect(notification.title).toBe("New Enrollment");
+      expect(notification.message).toBe("Test User enrolled in Test Course");
+      expect(notification.linkUrl).toBe(
+        `/instructor/${base.course.id}/students`
+      );
+      expect(notification.isRead).toBe(false);
+    });
+
+    it("does not notify the enrolling student", () => {
+      enrollUser({
+        userId: base.user.id,
+        courseId: base.course.id,
+        sendEmail: false,
+        skipValidation: false,
+      });
+
+      expect(getNotificationsFor(base.user.id)).toHaveLength(0);
     });
   });
 
