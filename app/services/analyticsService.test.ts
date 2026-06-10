@@ -19,6 +19,7 @@ import {
   getEnrollmentTrend,
   getLessonFunnel,
   getOverviewStats,
+  getPlatformOverviewStats,
   getQuizPerformance,
   getRevenueTrend,
 } from "./analyticsService";
@@ -205,7 +206,10 @@ describe("analyticsService", () => {
       enroll({ userId: studentB.id, courseId: base.course.id });
       enroll({ userId: studentC.id, courseId: second.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: null,
+      });
 
       expect(stats).toMatchObject({ courseCount: 2, totalEnrollments: 3 });
     });
@@ -218,7 +222,10 @@ describe("analyticsService", () => {
       });
       enroll({ userId: base.user.id, courseId: base.course.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: null,
+      });
 
       expect(stats).toMatchObject({ courseCount: 2, totalEnrollments: 1 });
     });
@@ -244,7 +251,10 @@ describe("analyticsService", () => {
         pricePaidCents: 9900,
       });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: null,
+      });
 
       expect(stats).toEqual({
         courseCount: 1,
@@ -265,7 +275,10 @@ describe("analyticsService", () => {
         .returning()
         .get();
 
-      const stats = getOverviewStats({ instructorId: newInstructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: newInstructor.id,
+        since: null,
+      });
 
       expect(stats).toEqual({
         courseCount: 0,
@@ -288,9 +301,16 @@ describe("analyticsService", () => {
         courseId: base.course.id,
         pricePaidCents: 4900,
       });
-      purchase({ userId: studentB.id, courseId: second.id, pricePaidCents: 9900 });
+      purchase({
+        userId: studentB.id,
+        courseId: second.id,
+        pricePaidCents: 9900,
+      });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: null,
+      });
 
       expect(stats).toMatchObject({
         grossEarningsCents: 14800,
@@ -304,12 +324,19 @@ describe("analyticsService", () => {
       const buyer = createStudent("buyer@example.com");
       const seatA = createStudent("seat-a@example.com");
       const seatB = createStudent("seat-b@example.com");
-      purchase({ userId: buyer.id, courseId: base.course.id, pricePaidCents: 30000 });
+      purchase({
+        userId: buyer.id,
+        courseId: base.course.id,
+        pricePaidCents: 30000,
+      });
       enroll({ userId: base.user.id, courseId: base.course.id });
       enroll({ userId: seatA.id, courseId: base.course.id });
       enroll({ userId: seatB.id, courseId: base.course.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: null,
+      });
 
       expect(stats).toMatchObject({
         totalEnrollments: 3,
@@ -321,7 +348,10 @@ describe("analyticsService", () => {
     it("reports zero average revenue per student when all enrollments are free", () => {
       enroll({ userId: base.user.id, courseId: base.course.id });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since: null });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since: null,
+      });
 
       expect(stats).toMatchObject({
         totalEnrollments: 1,
@@ -370,7 +400,11 @@ describe("analyticsService", () => {
 
     it("includes activity dated exactly at the range start", () => {
       const since = "2026-05-01T00:00:00.000Z";
-      enroll({ userId: base.user.id, courseId: base.course.id, enrolledAt: since });
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        enrolledAt: since,
+      });
       purchase({
         userId: base.user.id,
         courseId: base.course.id,
@@ -378,7 +412,10 @@ describe("analyticsService", () => {
         createdAt: since,
       });
 
-      const stats = getOverviewStats({ instructorId: base.instructor.id, since });
+      const stats = getOverviewStats({
+        instructorId: base.instructor.id,
+        since,
+      });
 
       expect(stats).toMatchObject({
         totalEnrollments: 1,
@@ -464,8 +501,16 @@ describe("analyticsService", () => {
         instructorId: base.instructor.id,
         slug: "z-top-course",
       });
-      purchase({ userId: base.user.id, courseId: cheap.id, pricePaidCents: 1000 });
-      purchase({ userId: base.user.id, courseId: top.id, pricePaidCents: 5000 });
+      purchase({
+        userId: base.user.id,
+        courseId: cheap.id,
+        pricePaidCents: 1000,
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: top.id,
+        pricePaidCents: 5000,
+      });
 
       const stats = getCourseStats({ instructorId: base.instructor.id });
 
@@ -479,7 +524,11 @@ describe("analyticsService", () => {
     it("counts a team purchase's money once while counting every coupon enrollment", () => {
       const buyer = createStudent("buyer@example.com");
       const seatA = createStudent("seat-a@example.com");
-      purchase({ userId: buyer.id, courseId: base.course.id, pricePaidCents: 20000 });
+      purchase({
+        userId: buyer.id,
+        courseId: base.course.id,
+        pricePaidCents: 20000,
+      });
       enroll({ userId: base.user.id, courseId: base.course.id });
       enroll({ userId: seatA.id, courseId: base.course.id });
 
@@ -863,7 +912,11 @@ describe("analyticsService", () => {
       const [lessonA, lessonB] = [1, 2].map((position) =>
         testDb
           .insert(schema.lessons)
-          .values({ moduleId: module.id, title: `Lesson ${position}`, position })
+          .values({
+            moduleId: module.id,
+            title: `Lesson ${position}`,
+            position,
+          })
           .returning()
           .get()
       );
@@ -1116,10 +1169,7 @@ describe("analyticsService", () => {
 
       const funnel = getLessonFunnel({ courseId: base.course.id });
 
-      expect(funnel.map((step) => step.isLowRetention)).toEqual([
-        false,
-        false,
-      ]);
+      expect(funnel.map((step) => step.isLowRetention)).toEqual([false, false]);
     });
 
     it("does not flag retention above the 50% threshold", () => {
@@ -1138,10 +1188,7 @@ describe("analyticsService", () => {
 
       const funnel = getLessonFunnel({ courseId: base.course.id });
 
-      expect(funnel.map((step) => step.isLowRetention)).toEqual([
-        false,
-        false,
-      ]);
+      expect(funnel.map((step) => step.isLowRetention)).toEqual([false, false]);
     });
 
     it("counts a student once per lesson despite duplicate progress rows", () => {
@@ -1179,7 +1226,12 @@ describe("analyticsService", () => {
 
       expect(
         funnel.map(
-          ({ completedCount, retentionRate, isBiggestDropoff, isLowRetention }) => ({
+          ({
+            completedCount,
+            retentionRate,
+            isBiggestDropoff,
+            isLowRetention,
+          }) => ({
             completedCount,
             retentionRate,
             isBiggestDropoff,
@@ -1322,7 +1374,10 @@ describe("analyticsService", () => {
       const quizA = createQuiz({ lessonId: lessonA.id });
       const quizB = createQuiz({ lessonId: lessonB.id });
       const quizC = createQuiz({ lessonId: lessonC.id });
-      const [s1, s2, s3] = enrollStudents({ courseId: base.course.id, count: 3 });
+      const [s1, s2, s3] = enrollStudents({
+        courseId: base.course.id,
+        count: 3,
+      });
 
       attemptQuiz({ userId: s1.id, quizId: quizA.id, score: 1.0 });
       attemptQuiz({ userId: s2.id, quizId: quizA.id, score: 0.0 });
@@ -1454,7 +1509,12 @@ describe("analyticsService", () => {
 
       // Only 4 students, all fail → failRate 1.0 but below the 5-student floor: not flagged.
       students.slice(0, 4).forEach((s) => {
-        attemptQuiz({ userId: s.id, quizId: quizTooFew.id, score: 0.1, passed: false });
+        attemptQuiz({
+          userId: s.id,
+          quizId: quizTooFew.id,
+          score: 0.1,
+          passed: false,
+        });
       });
 
       // 6 students, 2 fail → failRate ≈ 0.33 < 0.5: not flagged.
@@ -1544,6 +1604,175 @@ describe("analyticsService", () => {
 
       expect(perf.quizCount).toBe(0);
       expect(perf.modules).toEqual([]);
+    });
+  });
+
+  describe("getPlatformOverviewStats", () => {
+    it("aggregates revenue and enrollments across all instructors", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+      const otherCourse = createCourse({
+        instructorId: otherInstructor.id,
+        slug: "other-course",
+      });
+      const studentB = createStudent("b@example.com");
+      enroll({ userId: base.user.id, courseId: base.course.id });
+      enroll({ userId: studentB.id, courseId: otherCourse.id });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+      });
+      purchase({
+        userId: studentB.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 9900,
+      });
+
+      const stats = getPlatformOverviewStats({ since: null });
+
+      expect(stats).toMatchObject({
+        totalRevenueCents: 14800,
+        totalEnrollments: 2,
+      });
+    });
+
+    it("identifies the top earning course", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+      const otherCourse = createCourse({
+        instructorId: otherInstructor.id,
+        slug: "other-course",
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 9900,
+      });
+
+      const stats = getPlatformOverviewStats({ since: null });
+
+      expect(stats.topCourse).toEqual({
+        title: otherCourse.title,
+        revenueCents: 9900,
+      });
+    });
+
+    it("returns null topCourse when there are no purchases", () => {
+      enroll({ userId: base.user.id, courseId: base.course.id });
+
+      const stats = getPlatformOverviewStats({ since: null });
+
+      expect(stats).toEqual({
+        totalRevenueCents: 0,
+        totalEnrollments: 1,
+        topCourse: null,
+      });
+    });
+
+    it("returns zeros when the platform has no data", () => {
+      const stats = getPlatformOverviewStats({ since: null });
+
+      expect(stats).toEqual({
+        totalRevenueCents: 0,
+        totalEnrollments: 0,
+        topCourse: null,
+      });
+    });
+
+    it("respects the time period filter", () => {
+      const studentB = createStudent("b@example.com");
+      enroll({
+        userId: base.user.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-01-15T00:00:00.000Z",
+      });
+      enroll({
+        userId: studentB.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-05-20T00:00:00.000Z",
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+        createdAt: "2026-01-15T00:00:00.000Z",
+      });
+      purchase({
+        userId: studentB.id,
+        courseId: base.course.id,
+        pricePaidCents: 9900,
+        createdAt: "2026-05-20T00:00:00.000Z",
+      });
+
+      const stats = getPlatformOverviewStats({
+        since: "2026-05-01T00:00:00.000Z",
+      });
+
+      expect(stats).toEqual({
+        totalRevenueCents: 9900,
+        totalEnrollments: 1,
+        topCourse: {
+          title: base.course.title,
+          revenueCents: 9900,
+        },
+      });
+    });
+
+    it("picks the correct top course when filtered by time period", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+      const otherCourse = createCourse({
+        instructorId: otherInstructor.id,
+        slug: "other-course",
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 50000,
+        createdAt: "2026-01-15T00:00:00.000Z",
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 1000,
+        createdAt: "2026-05-20T00:00:00.000Z",
+      });
+
+      const stats = getPlatformOverviewStats({
+        since: "2026-05-01T00:00:00.000Z",
+      });
+
+      expect(stats.topCourse).toEqual({
+        title: otherCourse.title,
+        revenueCents: 1000,
+      });
     });
   });
 });

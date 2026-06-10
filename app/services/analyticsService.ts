@@ -185,6 +185,57 @@ export function getCourseStats(opts: { instructorId: number }): CourseStats[] {
   }));
 }
 
+// ─── Platform-wide (admin) analytics ───
+
+export interface PlatformOverviewStats {
+  totalRevenueCents: number;
+  totalEnrollments: number;
+  topCourse: { title: string; revenueCents: number } | null;
+}
+
+export function getPlatformOverviewStats(opts: {
+  since: string | null;
+}): PlatformOverviewStats {
+  const enrollmentTotal = db
+    .select({
+      totalEnrollments: sql<number>`count(*)`,
+    })
+    .from(enrollments)
+    .where(opts.since ? gte(enrollments.enrolledAt, opts.since) : undefined)
+    .get()!;
+
+  const purchaseTotal = db
+    .select({
+      totalRevenueCents: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+    })
+    .from(purchases)
+    .where(opts.since ? gte(purchases.createdAt, opts.since) : undefined)
+    .get()!;
+
+  const topCourseRow = db
+    .select({
+      title: courses.title,
+      revenueCents: sql<number>`sum(${purchases.pricePaid})`.as(
+        "revenue_cents"
+      ),
+    })
+    .from(purchases)
+    .innerJoin(courses, eq(courses.id, purchases.courseId))
+    .where(opts.since ? gte(purchases.createdAt, opts.since) : undefined)
+    .groupBy(purchases.courseId)
+    .orderBy(desc(sql`revenue_cents`))
+    .limit(1)
+    .get();
+
+  return {
+    totalRevenueCents: purchaseTotal.totalRevenueCents,
+    totalEnrollments: enrollmentTotal.totalEnrollments,
+    topCourse: topCourseRow
+      ? { title: topCourseRow.title, revenueCents: topCourseRow.revenueCents }
+      : null,
+  };
+}
+
 // ─── Trend series ───
 
 export interface TrendPoint {
@@ -239,7 +290,10 @@ function bucketExpr(opts: {
 }
 
 /** JS twin of `bucketExpr`, used to zero-fill buckets SQL never saw. */
-function bucketKeyFor(opts: { iso: string; granularity: RangeGranularity }): string {
+function bucketKeyFor(opts: {
+  iso: string;
+  granularity: RangeGranularity;
+}): string {
   if (opts.granularity === "monthly") return opts.iso.slice(0, 7);
   if (opts.granularity === "daily") return opts.iso.slice(0, 10);
   const date = new Date(opts.iso);
@@ -249,7 +303,10 @@ function bucketKeyFor(opts: { iso: string; granularity: RangeGranularity }): str
   return date.toISOString().slice(0, 10);
 }
 
-function nextBucketKey(opts: { bucket: string; granularity: RangeGranularity }): string {
+function nextBucketKey(opts: {
+  bucket: string;
+  granularity: RangeGranularity;
+}): string {
   if (opts.granularity === "monthly") {
     const [year, month] = opts.bucket.split("-").map(Number);
     // `month` is 1-based, Date.UTC months are 0-based — passing it unshifted
@@ -276,13 +333,18 @@ function zeroFill(opts: {
 }): TrendPoint[] {
   if (opts.rows.length === 0) return [];
 
-  const valueByBucket = new Map(opts.rows.map((row) => [row.bucket, row.value]));
+  const valueByBucket = new Map(
+    opts.rows.map((row) => [row.bucket, row.value])
+  );
   const firstDataBucket = opts.rows[0].bucket;
   const lastDataBucket = opts.rows[opts.rows.length - 1].bucket;
   const start = opts.since
     ? bucketKeyFor({ iso: opts.since, granularity: opts.granularity })
     : firstDataBucket;
-  const untilBucket = bucketKeyFor({ iso: opts.until, granularity: opts.granularity });
+  const untilBucket = bucketKeyFor({
+    iso: opts.until,
+    granularity: opts.granularity,
+  });
   const end = untilBucket > lastDataBucket ? untilBucket : lastDataBucket;
 
   const series: TrendPoint[] = [];
@@ -477,7 +539,9 @@ export interface LessonFunnelStep {
  * counts. A course with no lessons yields an empty array; lessons nobody
  * completed yield zero counts, not missing rows.
  */
-export function getLessonFunnel(opts: { courseId: number }): LessonFunnelStep[] {
+export function getLessonFunnel(opts: {
+  courseId: number;
+}): LessonFunnelStep[] {
   const completionStats = db
     .select({
       lessonId: lessonProgress.lessonId,
@@ -518,7 +582,12 @@ export function getLessonFunnel(opts: { courseId: number }): LessonFunnelStep[] 
 
 /** Pure post-pass: derive retention and the two flags from ordered counts. */
 function annotateLessonFunnel(
-  rows: Array<Pick<LessonFunnelStep, "lessonId" | "lessonTitle" | "moduleTitle" | "completedCount">>
+  rows: Array<
+    Pick<
+      LessonFunnelStep,
+      "lessonId" | "lessonTitle" | "moduleTitle" | "completedCount"
+    >
+  >
 ): LessonFunnelStep[] {
   const retentionRates = rows.map((row, index) => {
     if (index === 0) return null;
