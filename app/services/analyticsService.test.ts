@@ -19,6 +19,8 @@ import {
   getEnrollmentTrend,
   getLessonFunnel,
   getOverviewStats,
+  getPlatformCourseBreakdown,
+  getPlatformInstructors,
   getPlatformOverviewStats,
   getPlatformRevenueTrend,
   getQuizPerformance,
@@ -37,6 +39,7 @@ function createCourse(opts: {
   instructorId: number;
   slug: string;
   status?: schema.CourseStatus;
+  price?: number;
 }) {
   return testDb
     .insert(schema.courses)
@@ -47,6 +50,31 @@ function createCourse(opts: {
       instructorId: opts.instructorId,
       categoryId: base.category.id,
       status: opts.status ?? schema.CourseStatus.Published,
+      price: opts.price ?? 0,
+    })
+    .returning()
+    .get();
+}
+
+function createInstructor(email: string) {
+  return testDb
+    .insert(schema.users)
+    .values({
+      name: `Instructor ${email}`,
+      email,
+      role: schema.UserRole.Instructor,
+    })
+    .returning()
+    .get();
+}
+
+function review(opts: { userId: number; courseId: number; rating: number }) {
+  return testDb
+    .insert(schema.courseReviews)
+    .values({
+      userId: opts.userId,
+      courseId: opts.courseId,
+      rating: opts.rating,
     })
     .returning()
     .get();
@@ -963,6 +991,153 @@ describe("analyticsService", () => {
       });
 
       expect(series).toEqual([]);
+    });
+  });
+
+  describe("getPlatformInstructors", () => {
+    it("returns only instructors who own at least one course, sorted by name", () => {
+      // base.instructor owns base.course. Add one more instructor with a
+      // course and one instructor with no courses.
+      const withCourse = createInstructor("aaron@example.com");
+      createCourse({ instructorId: withCourse.id, slug: "aaron-course" });
+      createInstructor("zoe-no-courses@example.com");
+
+      const instructors = getPlatformInstructors();
+
+      expect(instructors).toEqual([
+        { id: withCourse.id, name: "Instructor aaron@example.com" },
+        { id: base.instructor.id, name: "Test Instructor" },
+      ]);
+    });
+  });
+
+  describe("getPlatformCourseBreakdown", () => {
+    it("aggregates revenue, sales, enrollments, price and rating per course across instructors, ranked by revenue", () => {
+      const otherInstructor = createInstructor("other@example.com");
+      const otherCourse = createCourse({
+        instructorId: otherInstructor.id,
+        slug: "other-course",
+        price: 9900,
+      });
+      const studentA = createStudent("a@example.com");
+      const studentB = createStudent("b@example.com");
+
+      // base.course: one $49 sale, one enrollment, ratings 4 and 2 → avg 3.
+      purchase({
+        userId: studentA.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+      });
+      enroll({ userId: studentA.id, courseId: base.course.id });
+      review({ userId: studentA.id, courseId: base.course.id, rating: 4 });
+      review({ userId: studentB.id, courseId: base.course.id, rating: 2 });
+
+      // otherCourse: two sales totalling $198, two enrollments, no ratings.
+      purchase({
+        userId: studentA.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 9900,
+      });
+      purchase({
+        userId: studentB.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 9900,
+      });
+      enroll({ userId: studentA.id, courseId: otherCourse.id });
+      enroll({ userId: studentB.id, courseId: otherCourse.id });
+
+      const rows = getPlatformCourseBreakdown({ since: null });
+
+      expect(rows).toEqual([
+        {
+          courseId: otherCourse.id,
+          title: "Course other-course",
+          instructorName: "Instructor other@example.com",
+          listPriceCents: 9900,
+          revenueCents: 19800,
+          salesCount: 2,
+          enrollmentCount: 2,
+          avgRating: null,
+        },
+        {
+          courseId: base.course.id,
+          title: "Test Course",
+          instructorName: "Test Instructor",
+          listPriceCents: 0,
+          revenueCents: 4900,
+          salesCount: 1,
+          enrollmentCount: 1,
+          avgRating: 3,
+        },
+      ]);
+    });
+
+    it("includes courses with no activity as zero rows with a null rating", () => {
+      const rows = getPlatformCourseBreakdown({ since: null });
+
+      expect(rows).toEqual([
+        {
+          courseId: base.course.id,
+          title: "Test Course",
+          instructorName: "Test Instructor",
+          listPriceCents: 0,
+          revenueCents: 0,
+          salesCount: 0,
+          enrollmentCount: 0,
+          avgRating: null,
+        },
+      ]);
+    });
+
+    it("counts only revenue, sales and enrollments within the period", () => {
+      const student = createStudent("a@example.com");
+      // Inside the window.
+      purchase({
+        userId: student.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+        createdAt: "2026-06-10T00:00:00.000Z",
+      });
+      enroll({
+        userId: student.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-06-10T00:00:00.000Z",
+      });
+      // Before the window — excluded.
+      purchase({
+        userId: student.id,
+        courseId: base.course.id,
+        pricePaidCents: 9900,
+        createdAt: "2026-05-01T00:00:00.000Z",
+      });
+      enroll({
+        userId: student.id,
+        courseId: base.course.id,
+        enrolledAt: "2026-05-01T00:00:00.000Z",
+      });
+
+      const rows = getPlatformCourseBreakdown({
+        since: "2026-06-01T00:00:00.000Z",
+      });
+
+      expect(rows[0].revenueCents).toBe(4900);
+      expect(rows[0].salesCount).toBe(1);
+      expect(rows[0].enrollmentCount).toBe(1);
+    });
+
+    it("limits to one instructor's courses when instructorId is given", () => {
+      const otherInstructor = createInstructor("other@example.com");
+      const otherCourse = createCourse({
+        instructorId: otherInstructor.id,
+        slug: "other-course",
+      });
+
+      const rows = getPlatformCourseBreakdown({
+        since: null,
+        instructorId: otherInstructor.id,
+      });
+
+      expect(rows.map((r) => r.courseId)).toEqual([otherCourse.id]);
     });
   });
 

@@ -1,11 +1,14 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/admin.analytics";
 import {
+  getPlatformCourseBreakdown,
+  getPlatformInstructors,
   getPlatformOverviewStats,
   getPlatformRevenueTrend,
 } from "~/services/analyticsService";
 import { resolveDateRange } from "~/lib/date-range";
 import { RangeSelector } from "~/components/range-selector";
+import { InstructorFilter } from "~/components/instructor-filter";
 import { TrendChart } from "~/components/trend-chart";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
@@ -50,9 +53,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
+  const url = new URL(request.url);
   const now = new Date();
   const dateRange = resolveDateRange({
-    range: new URL(request.url).searchParams.get("range"),
+    range: url.searchParams.get("range"),
     now,
   });
 
@@ -63,7 +67,34 @@ export async function loader({ request }: Route.LoaderArgs) {
     granularity: dateRange.granularity,
   });
 
-  return { dateRange, stats, revenueTrend };
+  // Resolve the instructor filter against real instructors, so a stale or
+  // bogus ?instructor= param falls back to "All Instructors" rather than
+  // silently filtering every course away.
+  const instructors = getPlatformInstructors();
+  const requestedInstructorId = Number(url.searchParams.get("instructor"));
+  const selectedInstructorId = instructors.some(
+    (i) => i.id === requestedInstructorId
+  )
+    ? requestedInstructorId
+    : null;
+
+  const courseBreakdown = getPlatformCourseBreakdown({
+    since: dateRange.since,
+    instructorId: selectedInstructorId ?? undefined,
+  });
+
+  return {
+    dateRange,
+    stats,
+    revenueTrend,
+    instructors,
+    selectedInstructorId,
+    courseBreakdown,
+  };
+}
+
+function formatRating(rating: number | null) {
+  return rating === null ? "—" : rating.toFixed(1);
 }
 
 /** Unlike formatPrice, zero renders "$0.00" — a bucket with no sales isn't "Free". */
@@ -96,7 +127,14 @@ export function HydrateFallback() {
 }
 
 export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
-  const { stats, dateRange, revenueTrend } = loaderData;
+  const {
+    stats,
+    dateRange,
+    revenueTrend,
+    instructors,
+    selectedInstructorId,
+    courseBreakdown,
+  } = loaderData;
 
   const hasData = stats.totalRevenueCents > 0 || stats.totalEnrollments > 0;
 
@@ -209,6 +247,88 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
                 label="Revenue"
                 formatValue={formatEarnings}
               />
+            </CardContent>
+          </Card>
+
+          {/* Per-course breakdown — revenue/sales/enrollments follow the range;
+              list price and rating are all-time */}
+          <Card className="mt-6">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+              <CardTitle className="text-base">
+                Course Breakdown{" "}
+                <span className="font-normal text-muted-foreground">
+                  · {dateRange.label.toLowerCase()}
+                </span>
+              </CardTitle>
+              <InstructorFilter
+                instructors={instructors}
+                value={selectedInstructorId}
+              />
+            </CardHeader>
+            <CardContent className="overflow-x-auto p-0">
+              {courseBreakdown.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No courses to show.
+                </p>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Course
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Instructor
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        List Price
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Revenue
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Sales
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Enrollments
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Rating
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {courseBreakdown.map((course) => (
+                      <tr
+                        key={course.courseId}
+                        className="border-b border-border last:border-0"
+                      >
+                        <td className="px-4 py-3 text-sm font-medium">
+                          {course.title}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-muted-foreground">
+                          {course.instructorName}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                          {formatPrice(course.listPriceCents)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                          {formatEarnings(course.revenueCents)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                          {course.salesCount}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                          {course.enrollmentCount}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-muted-foreground">
+                          {formatRating(course.avgRating)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </CardContent>
           </Card>
         </>

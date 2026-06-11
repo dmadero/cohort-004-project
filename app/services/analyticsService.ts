@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { db } from "~/db";
 import {
+  courseReviews,
   courses,
   enrollments,
   lessonProgress,
@@ -20,6 +21,7 @@ import {
   purchases,
   quizAttempts,
   quizzes,
+  users,
 } from "~/db/schema";
 import type { RangeGranularity } from "~/lib/date-range";
 
@@ -234,6 +236,121 @@ export function getPlatformOverviewStats(opts: {
       ? { title: topCourseRow.title, revenueCents: topCourseRow.revenueCents }
       : null,
   };
+}
+
+export interface PlatformInstructor {
+  id: number;
+  name: string;
+}
+
+/**
+ * Instructors who own at least one course, sorted by name — the population for
+ * the admin course-breakdown filter. An instructor with the role but no
+ * courses is excluded (the inner join drops them): an empty filter option
+ * would never match a row.
+ */
+export function getPlatformInstructors(): PlatformInstructor[] {
+  return db
+    .selectDistinct({ id: users.id, name: users.name })
+    .from(users)
+    .innerJoin(courses, eq(courses.instructorId, users.id))
+    .orderBy(asc(users.name))
+    .all();
+}
+
+export interface PlatformCourseStats {
+  courseId: number;
+  title: string;
+  instructorName: string;
+  /** Course list price in cents (`courses.price`), independent of any sale. */
+  listPriceCents: number;
+  /** SUM(purchases.pricePaid) in cents within the period; 0 when none. */
+  revenueCents: number;
+  /** Number of purchases within the period; 0 when none. */
+  salesCount: number;
+  /** Enrollments within the period; 0 when none. */
+  enrollmentCount: number;
+  /**
+   * Mean of all course ratings (1–5), all-time — ratings are cumulative, not
+   * period activity. Null when the course has no reviews ("no data" is not a
+   * zero-star average).
+   */
+  avgRating: number | null;
+}
+
+/**
+ * Per-course breakdown across every course on the platform, optionally scoped
+ * to one instructor, ordered by period revenue descending then title. Revenue,
+ * sales, and enrollments follow the requested period; list price and average
+ * rating are structural and stay all-time. One aggregate query: purchases,
+ * enrollments, and reviews are grouped in subqueries before joining, so the
+ * one-to-many relations cannot fan out each other's sums. Courses with no
+ * activity in the window appear with zeros and a null rating.
+ */
+export function getPlatformCourseBreakdown(opts: {
+  /** Inclusive ISO-UTC lower bound for revenue/sales/enrollments; null = all-time. */
+  since: string | null;
+  /** Limit to one instructor's courses; omitted = every course. */
+  instructorId?: number;
+}): PlatformCourseStats[] {
+  const enrollmentStats = db
+    .select({
+      courseId: enrollments.courseId,
+      enrollmentCount: sql<number>`count(*)`.as("enrollment_count"),
+    })
+    .from(enrollments)
+    .where(opts.since ? gte(enrollments.enrolledAt, opts.since) : undefined)
+    .groupBy(enrollments.courseId)
+    .as("enrollment_stats");
+
+  const purchaseStats = db
+    .select({
+      courseId: purchases.courseId,
+      revenueCents: sql<number>`sum(${purchases.pricePaid})`.as(
+        "revenue_cents"
+      ),
+      salesCount: sql<number>`count(*)`.as("sales_count"),
+    })
+    .from(purchases)
+    .where(opts.since ? gte(purchases.createdAt, opts.since) : undefined)
+    .groupBy(purchases.courseId)
+    .as("purchase_stats");
+
+  const ratingStats = db
+    .select({
+      courseId: courseReviews.courseId,
+      avgRating: sql<number>`avg(${courseReviews.rating})`.as("avg_rating"),
+    })
+    .from(courseReviews)
+    .groupBy(courseReviews.courseId)
+    .as("rating_stats");
+
+  return db
+    .select({
+      courseId: courses.id,
+      title: courses.title,
+      instructorName: users.name,
+      listPriceCents: courses.price,
+      revenueCents: sql<number>`coalesce(${purchaseStats.revenueCents}, 0)`,
+      salesCount: sql<number>`coalesce(${purchaseStats.salesCount}, 0)`,
+      enrollmentCount: sql<number>`coalesce(${enrollmentStats.enrollmentCount}, 0)`,
+      avgRating: sql<number | null>`${ratingStats.avgRating}`,
+    })
+    .from(courses)
+    .innerJoin(users, eq(users.id, courses.instructorId))
+    .leftJoin(enrollmentStats, eq(enrollmentStats.courseId, courses.id))
+    .leftJoin(purchaseStats, eq(purchaseStats.courseId, courses.id))
+    .leftJoin(ratingStats, eq(ratingStats.courseId, courses.id))
+    .where(
+      opts.instructorId
+        ? eq(courses.instructorId, opts.instructorId)
+        : undefined
+    )
+    .orderBy(
+      desc(sql`coalesce(${purchaseStats.revenueCents}, 0)`),
+      asc(courses.title)
+    )
+    .all();
 }
 
 // ─── Trend series ───
