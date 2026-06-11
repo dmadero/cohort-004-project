@@ -1,8 +1,12 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/admin.analytics";
-import { getPlatformOverviewStats } from "~/services/analyticsService";
+import {
+  getPlatformOverviewStats,
+  getPlatformRevenueTrend,
+} from "~/services/analyticsService";
 import { resolveDateRange } from "~/lib/date-range";
 import { RangeSelector } from "~/components/range-selector";
+import { TrendChart } from "~/components/trend-chart";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -53,8 +57,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   });
 
   const stats = getPlatformOverviewStats({ since: dateRange.since });
+  const revenueTrend = getPlatformRevenueTrend({
+    since: dateRange.since,
+    until: now.toISOString(),
+    granularity: dateRange.granularity,
+  });
 
-  return { dateRange, stats };
+  return { dateRange, stats, revenueTrend };
+}
+
+/** Unlike formatPrice, zero renders "$0.00" — a bucket with no sales isn't "Free". */
+function formatEarnings(cents: number) {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
 export function HydrateFallback() {
@@ -82,7 +96,7 @@ export function HydrateFallback() {
 }
 
 export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
-  const { stats, dateRange } = loaderData;
+  const { stats, dateRange, revenueTrend } = loaderData;
 
   const hasData = stats.totalRevenueCents > 0 || stats.totalEnrollments > 0;
 
@@ -116,65 +130,88 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Revenue
+        <>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Revenue
+                </CardTitle>
+                <DollarSign className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {formatPrice(stats.totalRevenueCents)}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {dateRange.label}, all courses
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Enrollments
+                </CardTitle>
+                <Users className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {stats.totalEnrollments}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {dateRange.label}, all courses
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Top Earning Course
+                </CardTitle>
+                <Trophy className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                {stats.topCourse ? (
+                  <>
+                    <div className="text-3xl font-bold">
+                      {formatPrice(stats.topCourse.revenueCents)}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {stats.topCourse.title}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-3xl font-bold">—</div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      No revenue yet
+                    </p>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-base">
+                Revenue Over Time{" "}
+                <span className="font-normal text-muted-foreground">
+                  · {dateRange.label.toLowerCase()}
+                </span>
               </CardTitle>
-              <DollarSign className="size-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">
-                {formatPrice(stats.totalRevenueCents)}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {dateRange.label}, all courses
-              </p>
+              <TrendChart
+                points={revenueTrend}
+                granularity={dateRange.granularity}
+                label="Revenue"
+                formatValue={formatEarnings}
+              />
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Enrollments
-              </CardTitle>
-              <Users className="size-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{stats.totalEnrollments}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {dateRange.label}, all courses
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Top Earning Course
-              </CardTitle>
-              <Trophy className="size-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              {stats.topCourse ? (
-                <>
-                  <div className="text-3xl font-bold">
-                    {formatPrice(stats.topCourse.revenueCents)}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {stats.topCourse.title}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="text-3xl font-bold">—</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    No revenue yet
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        </>
       )}
     </div>
   );

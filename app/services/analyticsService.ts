@@ -443,6 +443,29 @@ export function getRevenueTrend(opts: TrendOptions): TrendPoint[] {
   return zeroFill({ rows, ...opts });
 }
 
+/**
+ * Combined gross revenue per time bucket across every course on the platform,
+ * gapless within the window. `value` = SUM(purchases.pricePaid) in cents,
+ * dated by purchase date — a single platform-wide line, no instructor or
+ * course scoping (admin analytics). Empty window → empty series.
+ */
+export function getPlatformRevenueTrend(opts: TrendWindow): TrendPoint[] {
+  const bucket = bucketExpr({
+    column: purchases.createdAt,
+    granularity: opts.granularity,
+  });
+
+  const rows = db
+    .select({ bucket, value: sql<number>`sum(${purchases.pricePaid})` })
+    .from(purchases)
+    .where(opts.since ? gte(purchases.createdAt, opts.since) : undefined)
+    .groupBy(bucket)
+    .orderBy(bucket)
+    .all();
+
+  return zeroFill({ rows, ...opts });
+}
+
 // ─── Course drill-down funnel ───
 
 export interface CourseFunnel {

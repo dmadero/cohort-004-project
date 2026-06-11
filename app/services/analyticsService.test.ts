@@ -20,6 +20,7 @@ import {
   getLessonFunnel,
   getOverviewStats,
   getPlatformOverviewStats,
+  getPlatformRevenueTrend,
   getQuizPerformance,
   getRevenueTrend,
 } from "./analyticsService";
@@ -869,6 +870,93 @@ describe("analyticsService", () => {
     it("returns an empty series for a window with no purchases", () => {
       const series = getRevenueTrend({
         instructorId: base.instructor.id,
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-05T00:00:00.000Z",
+        granularity: "daily",
+      });
+
+      expect(series).toEqual([]);
+    });
+  });
+
+  describe("getPlatformRevenueTrend", () => {
+    it("sums purchases across all instructors' courses per bucket with zero-filled gaps", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+      const otherCourse = createCourse({
+        instructorId: otherInstructor.id,
+        slug: "other-course",
+      });
+      const studentB = createStudent("b@example.com");
+      // Two courses, two instructors — revenue is combined platform-wide.
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 4900,
+        createdAt: "2026-06-01T08:00:00.000Z",
+      });
+      purchase({
+        userId: studentB.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 9900,
+        createdAt: "2026-06-01T20:00:00.000Z",
+      });
+      purchase({
+        userId: studentB.id,
+        courseId: otherCourse.id,
+        pricePaidCents: 1000,
+        createdAt: "2026-06-03T00:00:00.000Z",
+      });
+
+      const series = getPlatformRevenueTrend({
+        since: "2026-06-01T00:00:00.000Z",
+        until: "2026-06-03T12:00:00.000Z",
+        granularity: "daily",
+      });
+
+      expect(series).toEqual([
+        { bucket: "2026-06-01", value: 14800 },
+        { bucket: "2026-06-02", value: 0 },
+        { bucket: "2026-06-03", value: 1000 },
+      ]);
+    });
+
+    it("buckets monthly with zero-revenue months filled as $0 over all-time", () => {
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 5000,
+        createdAt: "2026-04-15T00:00:00.000Z",
+      });
+      purchase({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaidCents: 2500,
+        createdAt: "2026-06-10T00:00:00.000Z",
+      });
+
+      const series = getPlatformRevenueTrend({
+        since: null,
+        until: "2026-06-30T00:00:00.000Z",
+        granularity: "monthly",
+      });
+
+      expect(series).toEqual([
+        { bucket: "2026-04", value: 5000 },
+        { bucket: "2026-05", value: 0 },
+        { bucket: "2026-06", value: 2500 },
+      ]);
+    });
+
+    it("returns an empty series for a window with no purchases", () => {
+      const series = getPlatformRevenueTrend({
         since: "2026-06-01T00:00:00.000Z",
         until: "2026-06-05T00:00:00.000Z",
         granularity: "daily",
